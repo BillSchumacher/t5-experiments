@@ -49,8 +49,7 @@ def build_pretraining_data_loader(dataset, consumed_samples):
             data_parallel_size=mpu.get_data_parallel_world_size(),
             data_sharding=args.data_sharding)
     else:
-        raise Exception('{} dataloader type is not supported.'.format(
-                args.dataloader_type))
+        raise Exception(f'{args.dataloader_type} dataloader type is not supported.')
 
     # Torch dataloader.
     return torch.utils.data.DataLoader(dataset,
@@ -68,20 +67,19 @@ class MegatronPretrainingSampler:
         self.micro_batch_size = micro_batch_size
         self.data_parallel_rank = data_parallel_rank
         self.micro_batch_times_data_parallel_size = \
-            self.micro_batch_size * data_parallel_size
+                self.micro_batch_size * data_parallel_size
         self.drop_last = drop_last
 
         # Sanity checks.
-        assert self.total_samples > 0, \
-            'no sample to consume: {}'.format(self.total_samples)
-        assert self.consumed_samples < self.total_samples, \
-            'no samples left to consume: {}, {}'.format(self.consumed_samples,
-                                                        self.total_samples)
+        assert self.total_samples > 0, f'no sample to consume: {self.total_samples}'
+        assert (
+            self.consumed_samples < self.total_samples
+        ), f'no samples left to consume: {self.consumed_samples}, {self.total_samples}'
         assert self.micro_batch_size > 0
         assert data_parallel_size > 0
-        assert self.data_parallel_rank < data_parallel_size, \
-            'data_parallel_rank should be smaller than data size: {}, ' \
-            '{}'.format(self.data_parallel_rank, data_parallel_size)
+        assert (
+            self.data_parallel_rank < data_parallel_size
+        ), f'data_parallel_rank should be smaller than data size: {self.data_parallel_rank}, {data_parallel_size}'
 
     def __len__(self):
         return self.total_samples
@@ -142,18 +140,17 @@ class MegatronPretrainingRandomSampler:
         self.data_parallel_size = data_parallel_size
         self.data_sharding = data_sharding
         self.micro_batch_times_data_parallel_size = \
-            self.micro_batch_size * data_parallel_size
+                self.micro_batch_size * data_parallel_size
         self.last_batch_size = \
-            self.total_samples % self.micro_batch_times_data_parallel_size
+                self.total_samples % self.micro_batch_times_data_parallel_size
 
         # Sanity checks.
-        assert self.total_samples > 0, \
-            'no sample to consume: {}'.format(self.total_samples)
+        assert self.total_samples > 0, f'no sample to consume: {self.total_samples}'
         assert self.micro_batch_size > 0
         assert data_parallel_size > 0
-        assert self.data_parallel_rank < data_parallel_size, \
-            'data_parallel_rank should be smaller than data size: {}, ' \
-            '{}'.format(self.data_parallel_rank, data_parallel_size)
+        assert (
+            self.data_parallel_rank < data_parallel_size
+        ), f'data_parallel_rank should be smaller than data size: {self.data_parallel_rank}, {data_parallel_size}'
 
     def __len__(self):
         return self.total_samples

@@ -94,13 +94,14 @@ class Classification(MegatronModule):
         """For easy load when model is combined with other heads,
         add an extra key."""
 
-        state_dict_ = {}
-        state_dict_[self._language_model_key] \
-            = self.language_model.state_dict_for_save_checkpoint(
-                destination, prefix, keep_vars)
+        state_dict_ = {
+            self._language_model_key: self.language_model.state_dict_for_save_checkpoint(
+                destination, prefix, keep_vars
+            )
+        }
         if self.post_process:
             state_dict_[self._classification_head_key] \
-                = self.classification_head.state_dict(
+                    = self.classification_head.state_dict(
                     destination, prefix, keep_vars)
         return state_dict_
 
@@ -114,6 +115,6 @@ class Classification(MegatronModule):
                 self.classification_head.load_state_dict(
                     state_dict[self._classification_head_key], strict=strict)
             else:
-                print_rank_last('***WARNING*** could not find {} in the checkpoint, '
-                                'initializing to random'.format(
-                                    self._classification_head_key))
+                print_rank_last(
+                    f'***WARNING*** could not find {self._classification_head_key} in the checkpoint, initializing to random'
+                )

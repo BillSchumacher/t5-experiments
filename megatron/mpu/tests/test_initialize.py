@@ -62,8 +62,9 @@ def test_initialize_model_parallel(tensor_model_parallel_size):
 def test_get_tensor_model_parallel_src_rank(tensor_model_parallel_size_):
 
     if torch.distributed.get_rank() == 0:
-        print('> testing get_tensor_model_parallel_src_rank with size {} ...'.format(
-            tensor_model_parallel_size_))
+        print(
+            f'> testing get_tensor_model_parallel_src_rank with size {tensor_model_parallel_size_} ...'
+        )
     tensor_model_parallel_size = min(tensor_model_parallel_size_,
                               torch.distributed.get_world_size())
     assert not mpu.model_parallel_is_initialized()

@@ -83,15 +83,13 @@ class Encoder(object):
             doc_ids = []
 
             def get_sentences(text):
-                if isinstance(text, list):
-                    return text
-                return Encoder.splitter.tokenize(text)
+                return text if isinstance(text, list) else Encoder.splitter.tokenize(text)
 
             for sentence in get_sentences(text):
                 sentence_ids = Encoder.tokenizer.tokenize(sentence)
                 if len(sentence_ids) > 0:
                     doc_ids.append(sentence_ids)
-            if len(doc_ids) > 0 and self.args.append_eod:
+            if doc_ids and self.args.append_eod:
                 doc_ids[-1].append(Encoder.tokenizer.eod)
             ids[key] = doc_ids
         return ids, len(json_line)
@@ -137,9 +135,11 @@ def get_args():
     args = parser.parse_args()
     args.keep_empty = False
 
-    if args.tokenizer_type.lower().startswith('bert'):
-        if not args.split_sentences:
-            print("Bert tokenizer detected, are you sure you don't want to split sentences?")
+    if (
+        args.tokenizer_type.lower().startswith('bert')
+        and not args.split_sentences
+    ):
+        print("Bert tokenizer detected, are you sure you don't want to split sentences?")
 
     # some default/dummy values for the tokenizer
     args.rank = 0
@@ -168,22 +168,15 @@ def main():
     tokenizer = build_tokenizer(args)
     pool = multiprocessing.Pool(args.workers, initializer=encoder.initializer)
     encoded_docs = pool.imap(encoder.encode, fin, 25)
-    #encoded_docs = map(encoder.encode, fin)
-
-    level = "document"
-    if args.split_sentences:
-        level = "sentence"
-
+    level = "sentence" if args.split_sentences else "document"
     print(f"Vocab size: {tokenizer.vocab_size}")
     print(f"Output prefix: {args.output_prefix}")
     output_bin_files = {}
     output_idx_files = {}
     builders = {}
     for key in args.json_keys:
-        output_bin_files[key] = "{}_{}_{}.bin".format(args.output_prefix,
-                                                      key, level)
-        output_idx_files[key] = "{}_{}_{}.idx".format(args.output_prefix,
-                                                      key, level)
+        output_bin_files[key] = f"{args.output_prefix}_{key}_{level}.bin"
+        output_idx_files[key] = f"{args.output_prefix}_{key}_{level}.idx"
         builders[key] = indexed_dataset.make_builder(output_bin_files[key],
                                                impl=args.dataset_impl,
                                                vocab_size=tokenizer.vocab_size)

@@ -29,12 +29,13 @@ def get_open_retrieval_wiki_dataset():
     args = get_args()
     tokenizer = get_tokenizer()
 
-    dataset = OpenRetrievalEvidenceDataset('2018 Wikipedia from DPR codebase',
-                                           'evidence',
-                                           args.evidence_data_path,
-                                           tokenizer,
-                                           args.retriever_seq_length)
-    return dataset
+    return OpenRetrievalEvidenceDataset(
+        '2018 Wikipedia from DPR codebase',
+        'evidence',
+        args.evidence_data_path,
+        tokenizer,
+        args.retriever_seq_length,
+    )
 
 
 def get_open_retrieval_batch(data_iterator):
@@ -80,13 +81,8 @@ def build_tokens_types_paddings_from_text(row, tokenizer, max_seq_length):
 def build_tokens_types_paddings_from_ids(text_ids, max_seq_length,
                                          cls_id, sep_id, pad_id):
     """Build token types and paddings, trim if needed, and pad if needed."""
-    enc_ids = []
-    tokentypes_enc = []
-
-    # [CLS].
-    enc_ids.append(cls_id)
-    tokentypes_enc.append(0)
-
+    enc_ids = [cls_id]
+    tokentypes_enc = [0]
     # A.
     len_src = len(text_ids)
     enc_ids.extend(text_ids)
@@ -94,8 +90,8 @@ def build_tokens_types_paddings_from_ids(text_ids, max_seq_length,
 
     # Cap the size.
     if len(enc_ids) > max_seq_length - 1:
-        enc_ids = enc_ids[0: max_seq_length - 1]
-        tokentypes_enc = tokentypes_enc[0: max_seq_length - 1]
+        enc_ids = enc_ids[:max_seq_length - 1]
+        tokentypes_enc = tokentypes_enc[:max_seq_length - 1]
 
     # [SEP].
     enc_ids.append(sep_id)
@@ -121,14 +117,13 @@ def build_sample(row_id, context_ids, context_types, context_pad_mask):
     context_types = np.array(context_types, dtype=np.int64)
     context_mask = make_attention_mask(context_ids, context_ids)
 
-    sample = ({
+    return {
         'row_id': row_id,
         'context': context_ids,
         'context_mask': context_mask,
         'context_types': context_types,
-        'context_pad_mask': context_pad_mask
-    })
-    return sample
+        'context_pad_mask': context_pad_mask,
+    }
 
 
 class OpenRetrievalEvidenceDataset(ABC, Dataset):
@@ -141,8 +136,7 @@ class OpenRetrievalEvidenceDataset(ABC, Dataset):
         self.dataset_name = dataset_name
         self.tokenizer = tokenizer
         self.max_seq_length = max_seq_length
-        print_rank_0(' > building {} dataset for {}:'.format(self.task_name,
-                                                            self.dataset_name))
+        print_rank_0(f' > building {self.task_name} dataset for {self.dataset_name}:')
         # Process the files.
         print_rank_0(datapath)
         self.samples, self.id2text = self.process_samples_from_single_path(
@@ -153,8 +147,7 @@ class OpenRetrievalEvidenceDataset(ABC, Dataset):
             k = int(len(self.samples) * args.sample_rate)
             self.samples = random.sample(self.samples, k)
 
-        print_rank_0('  >> total number of samples: {}'.format(
-            len(self.samples)))
+        print_rank_0(f'  >> total number of samples: {len(self.samples)}')
 
     def __len__(self):
         return len(self.samples)
@@ -163,18 +156,16 @@ class OpenRetrievalEvidenceDataset(ABC, Dataset):
         row = self.samples[idx]
 
         context_ids, context_types, context_pad_mask = \
-            build_tokens_types_paddings_from_text(row, self.tokenizer, 
+                build_tokens_types_paddings_from_text(row, self.tokenizer, 
                 self.max_seq_length)
 
-        sample = build_sample(row['doc_id'],
-                              context_ids,
-                              context_types,
-                              context_pad_mask)
-        return sample
+        return build_sample(
+            row['doc_id'], context_ids, context_types, context_pad_mask
+        )
 
     @staticmethod
     def process_samples_from_single_path(filename):
-        print_rank_0(' > Processing {} ...'.format(filename))
+        print_rank_0(f' > Processing {filename} ...')
         total = 0
 
         rows = []
@@ -198,8 +189,7 @@ class OpenRetrievalEvidenceDataset(ABC, Dataset):
 
                 total += 1
                 if total % 100000 == 0:
-                    print_rank_0('  > processed {} rows so far ...'.format(
-                        total))
+                    print_rank_0(f'  > processed {total} rows so far ...')
 
-        print_rank_0(' >> processed {} samples.'.format(len(rows)))
+        print_rank_0(f' >> processed {len(rows)} samples.')
         return rows, id2text

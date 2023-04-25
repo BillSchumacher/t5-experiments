@@ -83,13 +83,13 @@ def load_tf_weights_in_t5(model, config, tf_checkpoint_path):
         )
         raise
     tf_path = os.path.abspath(tf_checkpoint_path)
-    logger.info("Converting TensorFlow checkpoint from {}".format(tf_path))
+    logger.info(f"Converting TensorFlow checkpoint from {tf_path}")
     # Load weights from TF model
     init_vars = tf.train.list_variables(tf_path)
     names = []
     tf_weights = {}
     for name, shape in init_vars:
-        logger.info("Loading TF weight {} with shape {}".format(name, shape))
+        logger.info(f"Loading TF weight {name} with shape {shape}")
         array = tf.train.load_variable(tf_path, name)
         names.append(name)
         tf_weights[name] = array
@@ -102,11 +102,11 @@ def load_tf_weights_in_t5(model, config, tf_checkpoint_path):
             n in ["adam_v", "adam_m", "AdamWeightDecayOptimizer", "AdamWeightDecayOptimizer_1", "global_step"]
             for n in name
         ):
-            logger.info("Skipping {}".format("/".join(name)))
+            logger.info(f'Skipping {"/".join(name)}')
             tf_weights.pop(txt_name, None)
             continue
         if "_slot_" in name[-1]:
-            logger.info("Skipping {}".format("/".join(name)))
+            logger.info(f'Skipping {"/".join(name)}')
             tf_weights.pop(txt_name, None)
             continue
         pointer = model
@@ -135,7 +135,7 @@ def load_tf_weights_in_t5(model, config, tf_checkpoint_path):
                     pointer = getattr(pointer, "final_layer_norm")
             elif scope_names[0] == "scale":
                 pointer = getattr(pointer, "weight")
-            elif scope_names[0] == "output_bias" or scope_names[0] == "beta":
+            elif scope_names[0] in ["output_bias", "beta"]:
                 pointer = getattr(pointer, "bias")
             elif scope_names[0] == "squad":
                 pointer = getattr(pointer, "classifier")
@@ -150,7 +150,7 @@ def load_tf_weights_in_t5(model, config, tf_checkpoint_path):
                 try:
                     pointer = getattr(pointer, scope_names[0])
                 except AttributeError:
-                    logger.info("Skipping {}".format("/".join(name)))
+                    logger.info(f'Skipping {"/".join(name)}')
                     continue
             if len(scope_names) >= 2:
                 num = int(scope_names[1])
@@ -158,7 +158,7 @@ def load_tf_weights_in_t5(model, config, tf_checkpoint_path):
         if scope_names[0] not in ["kernel", "scale", "embedding"]:
             pointer = getattr(pointer, "weight")
         if scope_names[0] != "embedding":
-            logger.info("Transposing numpy weight of shape {} for {}".format(array.shape, name))
+            logger.info(f"Transposing numpy weight of shape {array.shape} for {name}")
             array = np.transpose(array)
         try:
             assert (
@@ -167,11 +167,13 @@ def load_tf_weights_in_t5(model, config, tf_checkpoint_path):
         except AssertionError as e:
             e.args += (pointer.shape, array.shape)
             raise
-        logger.info("Initialize PyTorch weight {}".format(name))
+        logger.info(f"Initialize PyTorch weight {name}")
         pointer.data = torch.from_numpy(array.astype(np.float32))
         tf_weights.pop(txt_name, None)
 
-    logger.info("Weights not copied to PyTorch model: {}".format(", ".join(tf_weights.keys())))
+    logger.info(
+        f'Weights not copied to PyTorch model: {", ".join(tf_weights.keys())}'
+    )
     return model
 
 
@@ -439,13 +441,15 @@ class T5Attention(nn.Module):
         )  # equivalent of torch.einsum("bnqd,bnkd->bnqk", query_states, key_states), compatible with onnx op>9
 
         if position_bias is None:
-            if not self.has_relative_attention_bias:
-                position_bias = torch.zeros(
-                    (1, self.n_heads, real_seq_length, key_length), device=scores.device, dtype=scores.dtype
+            position_bias = (
+                self.compute_bias(real_seq_length, key_length)
+                if self.has_relative_attention_bias
+                else torch.zeros(
+                    (1, self.n_heads, real_seq_length, key_length),
+                    device=scores.device,
+                    dtype=scores.dtype,
                 )
-            else:
-                position_bias = self.compute_bias(real_seq_length, key_length)
-
+            )
             # if key and values are already calculated
             # we want only the last query position bias
             if past_key_value is not None:
@@ -520,8 +524,7 @@ class T5LayerSelfAttention(nn.Module):
             output_head_hiddens=output_head_hiddens
         )
         hidden_states = hidden_states + self.dropout(attention_output[0])
-        outputs = (hidden_states,) + attention_output[1:]  # add attentions if we output them
-        return outputs
+        return (hidden_states,) + attention_output[1:]
 
 
 class T5LayerCrossAttention(nn.Module):
@@ -564,8 +567,7 @@ class T5LayerCrossAttention(nn.Module):
             output_head_hiddens=output_head_hiddens
         )
         layer_output = hidden_states + self.dropout(attention_output[0])
-        outputs = (layer_output,) + attention_output[1:]  # add attentions if we output them
-        return outputs
+        return (layer_output,) + attention_output[1:]
 
 
 class T5Block(nn.Module):
@@ -600,11 +602,7 @@ class T5Block(nn.Module):
             assert self.is_decoder, "Only decoder can use `past_key_values`"
             expected_num_past_key_values = 2 if encoder_hidden_states is None else 4
 
-            error_message = "There should be {} past states. 2 (past / key) for self attention.{} Got {} past key / value states".format(
-                expected_num_past_key_values,
-                "2 (past / key) for cross attention" if expected_num_past_key_values == 4 else "",
-                len(past_key_value),
-            )
+            error_message = f'There should be {expected_num_past_key_values} past states. 2 (past / key) for self attention.{"2 (past / key) for cross attention" if expected_num_past_key_values == 4 else ""} Got {len(past_key_value)} past key / value states'
             assert len(past_key_value) == expected_num_past_key_values, error_message
 
             self_attn_past_key_value = past_key_value[:2]
@@ -626,8 +624,10 @@ class T5Block(nn.Module):
         hidden_states, present_key_value_state = self_attention_outputs[:2]
         attention_outputs = self_attention_outputs[2:]  # Keep self-attention outputs and relative position weights
 
-        do_cross_attention = self.is_decoder and encoder_hidden_states is not None
-        if do_cross_attention:
+        if (
+            do_cross_attention := self.is_decoder
+            and encoder_hidden_states is not None
+        ):
             # the actual query length is unknown for cross attention
             # if using past key value states. Need to inject it here
             if present_key_value_state is not None:
@@ -678,12 +678,11 @@ class T5PreTrainedModel(PreTrainedModel):
     def dummy_inputs(self):
         input_ids = torch.tensor(DUMMY_INPUTS)
         input_mask = torch.tensor(DUMMY_MASK)
-        dummy_inputs = {
+        return {
             "decoder_input_ids": input_ids,
             "input_ids": input_ids,
             "decoder_attention_mask": input_mask,
         }
-        return dummy_inputs
 
     def _init_weights(self, module):
         """ Initialize the weights """
@@ -776,7 +775,10 @@ class T5Stack(T5PreTrainedModel):
         self.is_decoder = config.is_decoder
 
         self.block = nn.ModuleList(
-            [T5Block(config, has_relative_attention_bias=bool(i == 0)) for i in range(config.num_layers)]
+            [
+                T5Block(config, has_relative_attention_bias=i == 0)
+                for i in range(config.num_layers)
+            ]
         )
         self.final_layer_norm = T5LayerNorm(config.d_model, eps=config.layer_norm_epsilon)
         self.dropout = nn.Dropout(config.dropout_rate)

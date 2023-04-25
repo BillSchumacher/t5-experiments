@@ -16,9 +16,7 @@ def make_attention_mask(source_block, target_block):
     :param target_block: 1-D array
     """
     mask = (target_block[None, :] >= 1) * (source_block[:, None] >= 1)
-    mask = mask.astype(np.int64)
-    # (source_length, target_length)
-    return mask
+    return mask.astype(np.int64)
 
 def get_one_epoch_dataloader(dataset, micro_batch_size=None):
     """Specifically one epoch to be used in an indexing job."""
@@ -53,10 +51,7 @@ def get_ict_batch(data_iterator):
     datatype = torch.int64
 
     # Broadcast data.
-    if data_iterator is None:
-        data = None
-    else:
-        data = next(data_iterator)
+    data = None if data_iterator is None else next(data_iterator)
     data_b = mpu.broadcast_data(keys, data, datatype)
 
     # Unpack.
@@ -72,13 +67,7 @@ def get_ict_batch(data_iterator):
 
 def join_str_list(str_list):
     """Join a list of strings, handling spaces appropriately"""
-    result = ""
-    for s in str_list:
-        if s.startswith("##"):
-            result += s[2:]
-        else:
-            result += " " + s
-    return result
+    return "".join(s[2:] if s.startswith("##") else f" {s}" for s in str_list)
 
 
 class BlockSampleData(object):
@@ -113,8 +102,7 @@ class BlockSamplesMapping(object):
 
     def __getitem__(self, idx):
         """Get the data associated with an indexed sample."""
-        sample_data = BlockSampleData(*self.mapping_array[idx])
-        return sample_data
+        return BlockSampleData(*self.mapping_array[idx])
 
 
 def get_block_samples_mapping(block_dataset, title_dataset, data_prefix, num_epochs,
@@ -135,13 +123,13 @@ def get_block_samples_mapping(block_dataset, title_dataset, data_prefix, num_epo
 
     # Filename of the index mapping
     indexmap_filename = data_prefix
-    indexmap_filename += '_{}_indexmap'.format(name)
+    indexmap_filename += f'_{name}_indexmap'
     if num_epochs != (np.iinfo(np.int32).max - 1):
-        indexmap_filename += '_{}ep'.format(num_epochs)
+        indexmap_filename += f'_{num_epochs}ep'
     if max_num_samples != (np.iinfo(np.int64).max - 1):
-        indexmap_filename += '_{}mns'.format(max_num_samples)
-    indexmap_filename += '_{}msl'.format(max_seq_length)
-    indexmap_filename += '_{}s'.format(seed)
+        indexmap_filename += f'_{max_num_samples}mns'
+    indexmap_filename += f'_{max_seq_length}msl'
+    indexmap_filename += f'_{seed}s'
     if use_one_sent_docs:
         indexmap_filename += '_1sentok'
     indexmap_filename += '.npy'
@@ -149,8 +137,9 @@ def get_block_samples_mapping(block_dataset, title_dataset, data_prefix, num_epo
     # Build the indexed mapping if not exist.
     if mpu.get_data_parallel_rank() == 0 and \
             not os.path.isfile(indexmap_filename):
-        print(' > WARNING: could not find index map file {}, building '
-              'the indices on rank 0 ...'.format(indexmap_filename))
+        print(
+            f' > WARNING: could not find index map file {indexmap_filename}, building the indices on rank 0 ...'
+        )
 
         # Make sure the types match the helpers input types.
         assert block_dataset.doc_idx.dtype == np.int64
@@ -159,8 +148,7 @@ def get_block_samples_mapping(block_dataset, title_dataset, data_prefix, num_epo
         # Build samples mapping
         verbose = torch.distributed.get_rank() == 0
         start_time = time.time()
-        print_rank_0(' > building samples index mapping for {} ...'.format(
-            name))
+        print_rank_0(f' > building samples index mapping for {name} ...')
 
         from megatron.data import helpers
         mapping_array = helpers.build_blocks_mapping(
@@ -177,8 +165,7 @@ def get_block_samples_mapping(block_dataset, title_dataset, data_prefix, num_epo
 
         print_rank_0(' > done building samples index mapping')
         np.save(indexmap_filename, mapping_array, allow_pickle=True)
-        print_rank_0(' > saved the index mapping in {}'.format(
-            indexmap_filename))
+        print_rank_0(f' > saved the index mapping in {indexmap_filename}')
         # Make sure all the ranks have built the mapping
         print_rank_0(' > elapsed time to build and save samples mapping '
                      '(seconds): {:4f}'.format(
@@ -193,8 +180,7 @@ def get_block_samples_mapping(block_dataset, title_dataset, data_prefix, num_epo
         group=mpu.get_data_parallel_group())
 
     # Load indexed dataset.
-    print_rank_0(' > loading indexed mapping from {}'.format(
-        indexmap_filename))
+    print_rank_0(f' > loading indexed mapping from {indexmap_filename}')
     start_time = time.time()
 
     mapping_array = np.load(indexmap_filename, allow_pickle=True, mmap_mode='r')
@@ -202,7 +188,6 @@ def get_block_samples_mapping(block_dataset, title_dataset, data_prefix, num_epo
 
     print_rank_0('    loaded indexed file in {:3.3f} seconds'.format(
         time.time() - start_time))
-    print_rank_0('    total number of samples: {}'.format(
-        mapping_array.shape[0]))
+    print_rank_0(f'    total number of samples: {mapping_array.shape[0]}')
 
     return samples_mapping

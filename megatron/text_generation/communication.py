@@ -140,17 +140,18 @@ def copy_from_last_to_first_pipeline_stage(size, dtype, tensor=None):
         if is_contiguous:
             tensor_ = tensor
         else:
-            if is_last_stage:
-                tensor_ = tensor.contiguous()
-            else:
-                tensor_ = torch.empty(size,
-                                      dtype=dtype,
-                                      device=torch.cuda.current_device())
+            tensor_ = (
+                tensor.contiguous()
+                if is_last_stage
+                else torch.empty(
+                    size, dtype=dtype, device=torch.cuda.current_device()
+                )
+            )
         # Broadcast from last stage into the first stage.
         torch.distributed.broadcast(tensor_, src, group)
-        # Update the first stage tensor
-        if is_first_stage and not is_contiguous:
-            tensor[...] = tensor_
+    # Update the first stage tensor
+    if is_first_stage and not is_contiguous:
+        tensor[...] = tensor_
 
 
 

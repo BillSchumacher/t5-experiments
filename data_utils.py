@@ -13,8 +13,7 @@ from torch.utils.data import IterableDataset
 def sharded_dataset_fn(shards, split=None, shuffle_files=False):
     if shuffle_files:
         random.shuffle(shards)
-    dataset = tf.data.TextLineDataset(shards)
-    return dataset
+    return tf.data.TextLineDataset(shards)
 
 
 def text_preprocessor(ds):

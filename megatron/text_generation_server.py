@@ -36,16 +36,16 @@ class MegatronGenerate(Resource):
      
     def put(self):
         args = get_args()
-        print("request IP: " + str(request.remote_addr))
+        print(f"request IP: {str(request.remote_addr)}")
         print(json.dumps(request.get_json()),flush=True)
         print("current time: ", datetime.datetime.now())
-       
-        if not "prompts" in request.get_json():
+
+        if "prompts" not in request.get_json():
             return "prompts argument required", 400
-        
+
         if "max_len" in request.get_json():
             return "max_len is no longer used.  Replace with tokens_to_generate", 400
-        
+
         if "sentences" in request.get_json():
             return "sentences is no longer used.  Replace with prompts", 400
 
@@ -66,36 +66,36 @@ class MegatronGenerate(Resource):
             logprobs = request.get_json()["logprobs"]
             if not isinstance(logprobs, bool):
                 return "logprobs must be a boolean value"
-        
+
         if tokens_to_generate == 0 and not logprobs:
             return "tokens_to_generate=0 implies logprobs should be True"
-        
+
         temperature = 1.0
         if "temperature" in request.get_json():
             temperature = request.get_json()["temperature"]
-            if not (type(temperature) == int or type(temperature) == float):
+            if type(temperature) not in [int, float]:
                 return "temperature must be a positive number less than or equal to 100.0"
             if not (0.0 < temperature <= 100.0):
                 return "temperature must be a positive number less than or equal to 100.0"
-        
+
         top_k = 0.0
         if "top_k" in request.get_json():
             top_k = request.get_json()["top_k"]
-            if not (type(top_k) == int):
+            if type(top_k) != int:
                 return "top_k must be an integer equal to or greater than 0 and less than or equal to 1000"
             if not (0 <= top_k <= 1000):
                 return "top_k must be equal to or greater than 0 and less than or equal to 1000"
-        
+
         top_p = 0.0
         if "top_p" in request.get_json():
             top_p = request.get_json()["top_p"]
-            if not (type(top_p) == float):
+            if type(top_p) != float:
                 return "top_p must be a positive float less than or equal to 1.0"
             if top_p > 0.0 and top_k > 0.0:
                 return "cannot set both top-k and top-p samplings."
             if not (0 <= top_p <= 1.0):
                 return "top_p must be less than or equal to 1.0"
-        
+
         add_BOS = False
         if "add_BOS" in request.get_json():
             add_BOS = request.get_json()["add_BOS"]
@@ -105,7 +105,7 @@ class MegatronGenerate(Resource):
         with lock:  # Need to get lock to keep multiple threads from hitting code
             MegatronGenerate.send_do_generate()  # Tell other ranks we're doing generate
             response, response_seg, response_logprobs, _ = \
-                generate_and_post_process(
+                    generate_and_post_process(
                     self.model,
                     prompts=prompts,
                     tokens_to_generate=tokens_to_generate,
@@ -115,7 +115,7 @@ class MegatronGenerate(Resource):
                     temperature=temperature,
                     add_BOS=add_BOS,
                     use_eod_token_for_early_termination=True)
-        
+
         return jsonify({"text": response,
             "segments": response_seg,
             "logprobs": response_logprobs})

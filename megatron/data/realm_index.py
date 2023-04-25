@@ -20,7 +20,7 @@ class OpenRetreivalDataStore(object):
     embeddings and necessary metadata for Retriever
     """
     def __init__(self, embedding_path=None, load_from_path=True, rank=None):
-        self.embed_data = dict()
+        self.embed_data = {}
         if embedding_path is None:
             args = get_args()
             embedding_path = args.embedding_path
@@ -32,7 +32,7 @@ class OpenRetreivalDataStore(object):
             self.load_from_file()
 
         block_data_name = os.path.splitext(self.embedding_path)[0]
-        self.temp_dir_name = block_data_name + '_tmp'
+        self.temp_dir_name = f'{block_data_name}_tmp'
 
     def state(self):
         return {
@@ -45,7 +45,7 @@ class OpenRetreivalDataStore(object):
         The metadata ends up getting used, and is also much smaller in
         dimensionality so it isn't really worth clearing.
         """
-        self.embed_data = dict()
+        self.embed_data = {}
 
     def load_from_file(self):
         """Populate members from instance saved to file"""
@@ -79,8 +79,7 @@ class OpenRetreivalDataStore(object):
             os.makedirs(self.temp_dir_name, exist_ok=True)
 
         # save the data for each shard
-        with open('{}/{}.pkl'.format(self.temp_dir_name, self.rank), 'wb') \
-            as writer:
+        with open(f'{self.temp_dir_name}/{self.rank}.pkl', 'wb') as writer:
             pickle.dump(self.state(), writer)
 
     def merge_shards_and_save(self):
@@ -94,7 +93,7 @@ class OpenRetreivalDataStore(object):
                 seen_own_shard = True
                 continue
 
-            with open('{}/{}'.format(self.temp_dir_name, fname), 'rb') as f:
+            with open(f'{self.temp_dir_name}/{fname}', 'rb') as f:
                 data = pickle.load(f)
                 old_size = len(self.embed_data)
                 shard_size = len(data['embed_data'])
@@ -111,8 +110,10 @@ class OpenRetreivalDataStore(object):
             pickle.dump(self.state(), final_file)
         shutil.rmtree(self.temp_dir_name, ignore_errors=True)
 
-        print("Finished merging {} shards for a total of {} embeds".format(
-            len(shard_names), len(self.embed_data)), flush=True)
+        print(
+            f"Finished merging {len(shard_names)} shards for a total of {len(self.embed_data)} embeds",
+            flush=True,
+        )
 
 
 class FaissMIPSIndex(object):
@@ -214,11 +215,7 @@ class FaissMIPSIndex(object):
         query_embeds = np.float32(detach(query_embeds))
 
         if reconstruct:
-            # get the vectors themselves
-            top_k_block_embeds = self.mips_index.search_and_reconstruct(\
-                query_embeds, top_k)
-            return top_k_block_embeds
-        else:
-            # get distances and indices of closest vectors
-            distances, block_indices = self.mips_index.search(query_embeds, top_k)
-            return distances, block_indices
+            return self.mips_index.search_and_reconstruct(query_embeds, top_k)
+        # get distances and indices of closest vectors
+        distances, block_indices = self.mips_index.search(query_embeds, top_k)
+        return distances, block_indices

@@ -134,12 +134,14 @@ def load_tf_weights_in_bert(model, config, tf_checkpoint_path):
                 scope_names = re.split(r"_(\d+)", m_name)
             else:
                 scope_names = [m_name]
-            if scope_names[0] == "kernel" or scope_names[0] == "gamma":
+            if (
+                scope_names[0] in ["kernel", "gamma"]
+                or scope_names[0] not in ["output_bias", "beta"]
+                and scope_names[0] == "output_weights"
+            ):
                 pointer = getattr(pointer, "weight")
-            elif scope_names[0] == "output_bias" or scope_names[0] == "beta":
+            elif scope_names[0] in ["output_bias", "beta"]:
                 pointer = getattr(pointer, "bias")
-            elif scope_names[0] == "output_weights":
-                pointer = getattr(pointer, "weight")
             elif scope_names[0] == "squad":
                 pointer = getattr(pointer, "classifier")
             else:
@@ -253,8 +255,7 @@ class BertSelfAttention(nn.Module):
 
         # sparse attention configuration
         self.is_sparse = False
-        sparse_config_cls_name = getattr(config, 'sparse_config_cls', None)
-        if sparse_config_cls_name:
+        if sparse_config_cls_name := getattr(config, 'sparse_config_cls', None):
             self.is_sparse = True
             sparse_config_cls = get_cls_by_name(sparse_config_cls_name)
             self.sparse_config = sparse_config_cls(**self.config.sparse_attention)
@@ -279,7 +280,7 @@ class BertSelfAttention(nn.Module):
             raise RuntimeError(f'BertSelfAttention does not support `relative_attention_bias` with `is_decoder` '
                                f' = {self.is_decoder}')
 
-        if self.position_embedding_type == "relative_key" or self.position_embedding_type == "relative_key_query":
+        if self.position_embedding_type in ["relative_key", "relative_key_query"]:
             self.max_position_embeddings = config.max_position_embeddings
             self.max_seq_len = 2 * config.max_position_embeddings
             self.distance_embedding = nn.Embedding(self.max_distance - 1, self.attention_head_size)
@@ -594,8 +595,7 @@ class BertAttention(nn.Module):
             output_attentions,
         )
         attention_output = self.output(self_outputs[0], hidden_states)
-        outputs = (attention_output,) + self_outputs[1:]  # add attentions if we output them
-        return outputs
+        return (attention_output,) + self_outputs[1:]
 
 
 class BertIntermediate(nn.Module):
@@ -664,7 +664,9 @@ class BertLayer(nn.Module):
         # decoder uni-directional self-attention cached key/values tuple is at positions 1,2
         self_attn_past_key_value = past_key_value[:2] if past_key_value is not None else None
         self_attention_outputs = self.attention(
-            hidden_states if not self.pre_layer_norm else self.pre_attention_ln(hidden_states),
+            self.pre_attention_ln(hidden_states)
+            if self.pre_layer_norm
+            else hidden_states,
             attention_mask,
             head_mask,
             position_bias=position_bias,
@@ -722,7 +724,11 @@ class BertLayer(nn.Module):
         return outputs
 
     def feed_forward_chunk(self, attention_output):
-        intermediate_inp = attention_output if not self.pre_layer_norm else self.post_attention_ln(attention_output)
+        intermediate_inp = (
+            self.post_attention_ln(attention_output)
+            if self.pre_layer_norm
+            else attention_output
+        )
         intermediate_output = self.intermediate(intermediate_inp)
         layer_output = self.output(intermediate_output, attention_output)
         if self.pre_layer_norm:
@@ -735,8 +741,11 @@ class BertEncoder(nn.Module):
         super().__init__()
         self.config = config
         self.layer = nn.ModuleList(
-                [BertLayer(config, has_relative_attention_bias=bool(i == 0)) for i in range(config.num_hidden_layers)]
-            )
+            [
+                BertLayer(config, has_relative_attention_bias=i == 0)
+                for i in range(config.num_hidden_layers)
+            ]
+        )
         self.gradient_checkpointing = False
 
     def forward(
@@ -808,16 +817,20 @@ class BertEncoder(nn.Module):
                     all_cross_attentions = all_cross_attentions + (layer_outputs[2],)
 
             if self.config.position_embedding_type == 'relative_attention_bias':
-                if not output_attentions:
-                    position_bias = layer_outputs[1]
-                else:
-                    position_bias = layer_outputs[2]
-
+                position_bias = layer_outputs[2] if output_attentions else layer_outputs[1]
         if output_hidden_states:
             all_hidden_states = all_hidden_states + (hidden_states,)
 
-        if not return_dict:
-            return tuple(
+        return (
+            BaseModelOutputWithPastAndCrossAttentions(
+                last_hidden_state=hidden_states,
+                past_key_values=next_decoder_cache,
+                hidden_states=all_hidden_states,
+                attentions=all_self_attentions,
+                cross_attentions=all_cross_attentions,
+            )
+            if return_dict
+            else tuple(
                 v
                 for v in [
                     hidden_states,
@@ -828,12 +841,6 @@ class BertEncoder(nn.Module):
                 ]
                 if v is not None
             )
-        return BaseModelOutputWithPastAndCrossAttentions(
-            last_hidden_state=hidden_states,
-            past_key_values=next_decoder_cache,
-            hidden_states=all_hidden_states,
-            attentions=all_self_attentions,
-            cross_attentions=all_cross_attentions,
         )
 
 
@@ -895,8 +902,7 @@ class BertOnlyMLMHead(nn.Module):
         self.predictions = BertLMPredictionHead(config)
 
     def forward(self, sequence_output):
-        prediction_scores = self.predictions(sequence_output)
-        return prediction_scores
+        return self.predictions(sequence_output)
 
 
 class BertOnlyNSPHead(nn.Module):
@@ -905,8 +911,7 @@ class BertOnlyNSPHead(nn.Module):
         self.seq_relationship = nn.Linear(config.hidden_size, 2)
 
     def forward(self, pooled_output):
-        seq_relationship_score = self.seq_relationship(pooled_output)
-        return seq_relationship_score
+        return self.seq_relationship(pooled_output)
 
 
 class BertPreTrainingHeads(nn.Module):
@@ -1242,16 +1247,17 @@ class BertModel(BertPreTrainedModel):
         sequence_output = encoder_outputs[0]
         pooled_output = self.pooler(sequence_output) if self.pooler is not None else None
 
-        if not return_dict:
-            return (sequence_output, pooled_output) + encoder_outputs[1:]
-
-        return BaseModelOutputWithPoolingAndCrossAttentions(
-            last_hidden_state=sequence_output,
-            pooler_output=pooled_output,
-            past_key_values=encoder_outputs.past_key_values,
-            hidden_states=encoder_outputs.hidden_states,
-            attentions=encoder_outputs.attentions,
-            cross_attentions=encoder_outputs.cross_attentions,
+        return (
+            BaseModelOutputWithPoolingAndCrossAttentions(
+                last_hidden_state=sequence_output,
+                pooler_output=pooled_output,
+                past_key_values=encoder_outputs.past_key_values,
+                hidden_states=encoder_outputs.hidden_states,
+                attentions=encoder_outputs.attentions,
+                cross_attentions=encoder_outputs.cross_attentions,
+            )
+            if return_dict
+            else (sequence_output, pooled_output) + encoder_outputs[1:]
         )
 
 
@@ -1800,7 +1806,7 @@ class BertForSequenceClassification(BertPreTrainedModel):
             if self.config.problem_type is None:
                 if self.num_labels == 1:
                     self.config.problem_type = "regression"
-                elif self.num_labels > 1 and (labels.dtype == torch.long or labels.dtype == torch.int):
+                elif self.num_labels > 1 and labels.dtype in [torch.long, torch.int]:
                     self.config.problem_type = "single_label_classification"
                 else:
                     self.config.problem_type = "multi_label_classification"

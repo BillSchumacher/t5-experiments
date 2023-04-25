@@ -39,16 +39,15 @@ class VitClassificationModel(MegatronModule):
             post_process=self.post_process,
             single_token_output=True
         )
-        
+
         if self.post_process:
-            if not self.finetune:
-                self.head = VitMlpHead(self.hidden_size, self.num_classes)
-            else:
-                self.head = get_linear_layer(
-                    self.hidden_size,
-                    self.num_classes,
-                    torch.nn.init.zeros_
+            self.head = (
+                get_linear_layer(
+                    self.hidden_size, self.num_classes, torch.nn.init.zeros_
                 )
+                if self.finetune
+                else VitMlpHead(self.hidden_size, self.num_classes)
+            )
 
     def set_input_tensor(self, input_tensor):
         """See megatron.model.transformer.set_input_tensor()"""

@@ -177,10 +177,7 @@ class Trainer:
                                f'clip_grad_norm = {self.args.clip_grad_norm}, '
                                f'clip_grad_value = {self.args.clip_grad_value}.')
 
-        self.clip_grad = False
-        if self.args.clip_grad_norm or self.args.clip_grad_value:
-            self.clip_grad = True
-
+        self.clip_grad = bool(self.args.clip_grad_norm or self.args.clip_grad_value)
         self.args.optimize_mode = getattr(self.args, 'optimize_mode', 'min')
         self.args.optimize_metric = getattr(self.args, 'optimize_metric', 'loss')
         if self.args.optimize_mode == 'min':
@@ -319,14 +316,13 @@ class Trainer:
                         self._clip_gradients()
                     with self.optimizer.skip_synchronize():
                         self.optimizer.step()
-                else:
-                    if self.clip_grad:
-                        self.optimizer.synchronize()
-                        self._clip_gradients()
-                        with self.optimizer.skip_synchronize():
-                            self.optimizer.step()
-                    else:
+                elif self.clip_grad:
+                    self.optimizer.synchronize()
+                    self._clip_gradients()
+                    with self.optimizer.skip_synchronize():
                         self.optimizer.step()
+                else:
+                    self.optimizer.step()
                 if self.lr_scheduler:
                     self.lr_scheduler.step()
         return batch_metrics, batch_metrics_data
@@ -387,16 +383,14 @@ class Trainer:
 
     def _reset_batch_metrics(self, split=None):
         if split is None:
-            self.batch_metrics = {}
-            self.batch_metrics['train'] = defaultdict(lambda: [])
+            self.batch_metrics = {'train': defaultdict(lambda: [])}
             self.batch_metrics['valid'] = defaultdict(lambda: [])
         else:
             self.batch_metrics[split] = defaultdict(lambda: [])
 
     def _reset_metrics_data(self, split=None):
         if split is None:
-            self.metrics_data = {}
-            self.metrics_data['train'] = defaultdict(lambda: [])
+            self.metrics_data = {'train': defaultdict(lambda: [])}
             self.metrics_data['valid'] = defaultdict(lambda: [])
         else:
             self.metrics_data[split] = defaultdict(lambda: [])
@@ -417,7 +411,7 @@ class Trainer:
             if hvd.rank() == 0 and len(metrics.keys() & m.keys()) != 0:
                 logger.warning(f'metrics ({m.keys()}) and batch-lvl metrics ({metrics.keys()}) have common names. '
                                f'Batch-lvl metric value would be overwritten.')
-            metrics.update(m)
+            metrics |= m
         return metrics
 
     def train(self) -> None:
@@ -571,22 +565,24 @@ class Trainer:
                 logger.warning('Optimizer is not loaded from the checkpoint. New optimizer is created.')
 
     def save(self, save_path, suffix='', metrics=None) -> None:
-        if hvd.rank() == 0 and save_path is not None:
-            if suffix == '':
-                save_path = f'{self.args.model_path}/model_{self.n_iter}.pth'
-            else:
-                save_path = f'{self.args.model_path}/model_{suffix}.pth'
-            to_save = {
-                       "model_state_dict": self.model.state_dict(),
-                       "optimizer_state_dict": self.optimizer.state_dict(),
-                       "iteration": self.n_iter,
-                       "epoch": self.n_epoch,
-                       }
-            if metrics:
-                to_save['metrics'] = metrics
-            if self.args.fp16:
-                to_save['amp'] = self.amp.state_dict()
-            if self.lr_scheduler:
-                to_save['lr_scheduler_state_dict'] = self.lr_scheduler.state_dict()
-            torch.save(to_save, save_path)
-            logger.info(f'Model was saved to {save_path}')
+        if hvd.rank() != 0 or save_path is None:
+            return
+        save_path = (
+            f'{self.args.model_path}/model_{self.n_iter}.pth'
+            if suffix == ''
+            else f'{self.args.model_path}/model_{suffix}.pth'
+        )
+        to_save = {
+                   "model_state_dict": self.model.state_dict(),
+                   "optimizer_state_dict": self.optimizer.state_dict(),
+                   "iteration": self.n_iter,
+                   "epoch": self.n_epoch,
+                   }
+        if metrics:
+            to_save['metrics'] = metrics
+        if self.args.fp16:
+            to_save['amp'] = self.amp.state_dict()
+        if self.lr_scheduler:
+            to_save['lr_scheduler_state_dict'] = self.lr_scheduler.state_dict()
+        torch.save(to_save, save_path)
+        logger.info(f'Model was saved to {save_path}')

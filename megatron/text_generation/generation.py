@@ -136,11 +136,7 @@ def generate_tokens_probs_and_return_on_first_stage(
 
     # Added termination_id to support the case that we want to terminate the
     # generation once that id is generated.
-    if hasattr(args, 'eos_id'):
-        termination_id = args.eos_id
-    else:
-        termination_id = tokenizer.eod
-
+    termination_id = args.eos_id if hasattr(args, 'eos_id') else tokenizer.eod
     # ===================
     # Pre-allocate memory
     # ===================
@@ -158,7 +154,7 @@ def generate_tokens_probs_and_return_on_first_stage(
         generated_sequence_lengths = torch.ones(
                 batch_size, dtype=torch.int64,
                 device=torch.cuda.current_device()) * max_sequence_length
-    
+
     # Whether we have reached a termination id.
     is_generation_done = torch.zeros(batch_size, dtype=torch.uint8,
                                      device=torch.cuda.current_device())
@@ -202,19 +198,19 @@ def generate_tokens_probs_and_return_on_first_stage(
                 # Calculate the log probabilities.
                 if return_output_log_probs:
                     log_probs = F.log_softmax(logits, dim=2)
-                    if return_output_log_probs:
-                        # Pick the tokens that we need to get the log
-                        # probabilities for. Note that next input token is
-                        # the token which we selected in the current logits,
-                        # so shift by 1.
-                        indices = torch.unsqueeze(
-                            tokens[
-                                :,
-                                (prev_context_length + 1):(context_length + 1)],
-                            2)
-                        output_log_probs[:,
-                                         prev_context_length:context_length] = \
-                            torch.gather(log_probs, 2, indices).squeeze(2)
+                if return_output_log_probs:
+                    # Pick the tokens that we need to get the log
+                    # probabilities for. Note that next input token is
+                    # the token which we selected in the current logits,
+                    # so shift by 1.
+                    indices = torch.unsqueeze(
+                        tokens[
+                            :,
+                            (prev_context_length + 1):(context_length + 1)],
+                        2)
+                    output_log_probs[:,
+                                     prev_context_length:context_length] = \
+                        torch.gather(log_probs, 2, indices).squeeze(2)
 
             # Update the tokens on the first stage so the next input to
             # the network is correct.
@@ -244,9 +240,8 @@ def generate_tokens_probs_and_return_on_first_stage(
     # ===================================================
 
     tokens = tokens[:, :(context_length + 1)]
-    if mpu.is_pipeline_last_stage():
-        if return_output_log_probs:
-            output_log_probs = output_log_probs[:, :context_length]
+    if mpu.is_pipeline_last_stage() and return_output_log_probs:
+        output_log_probs = output_log_probs[:, :context_length]
 
     # ======================================
     # Broadcast to the first pipeline stage.

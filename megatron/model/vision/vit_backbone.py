@@ -56,14 +56,13 @@ class VitMlpHead(MegatronModule):
         # sequence_index: index of the token to pool.
         dense_in_result = self.dense_in(hidden_states)
         tanh_result = torch.tanh(dense_in_result)
-        dense_out_result = self.dense_out(tanh_result)
-        return dense_out_result
+        return self.dense_out(tanh_result)
 
 
 def isPerfectSquare(x):
-    if(x >= 0):
+    if (x >= 0):
         sr = math.sqrt(x)
-        return (int(sr) * int(sr) == x)
+        return int(sr)**2 == x
     return False
 
 
@@ -78,12 +77,7 @@ def twod_interpolate_position_embeddings_hook(
 ):
 
     args = get_args()
-    num_patches_per_dim_h = args.img_h // args.patch_dim
-    num_patches_per_dim_w = args.img_w // args.patch_dim
-    num_patches = num_patches_per_dim_h * num_patches_per_dim_w
-    hidden_size = args.hidden_size
-
-    key = prefix + "weight"
+    key = f"{prefix}weight"
 
     assert key in state_dict
     if key in state_dict:
@@ -93,8 +87,13 @@ def twod_interpolate_position_embeddings_hook(
         assert(isPerfectSquare(input_seq_len) or isPerfectSquare(input_seq_len - CLASS_TOKEN_LENGTH))
         input_has_class_token = not isPerfectSquare(input_seq_len)
         num_tok_input = input_seq_len - CLASS_TOKEN_LENGTH if input_has_class_token else input_seq_len
+        num_patches_per_dim_h = args.img_h // args.patch_dim
+        num_patches_per_dim_w = args.img_w // args.patch_dim
+        num_patches = num_patches_per_dim_h * num_patches_per_dim_w
         num_tok_output = num_patches
         output_has_class_token = args.class_token_present
+
+        hidden_size = args.hidden_size
 
         # update input_param and load it to state_dict[key]
         if input_has_class_token:
