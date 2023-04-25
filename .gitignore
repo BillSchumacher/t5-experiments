@@ -3,6 +3,7 @@ __pycache__/
 *.py[cod]
 *$py.class
 
+
 # C extensions
 *.so
 
@@ -132,3 +133,4 @@ dmypy.json
 runs/
 data/*.tsv
 tests/runs/
+notebooks/debug_rmt_bptt.ipynb
