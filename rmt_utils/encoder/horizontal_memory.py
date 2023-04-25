@@ -31,8 +31,6 @@ def horizontal_memory_forward(
 
             if use_cache:
                 raise Warning("`use_cache=True` is incompatible with gradient checkpointing. Setting `use_cache=False`...")
-                use_cache = False
-
             def create_custom_forward(module):
                 def custom_forward(*inputs):
                     return module(*inputs, past_key_value, output_attentions)
@@ -53,7 +51,7 @@ def horizontal_memory_forward(
                 non_empty_mask = rmt_parent.memory_storage['non_empty_mask']
                 if layer_memory.shape[0] == 1:
                     layer_memory = layer_memory.repeat(len(non_empty_mask), 1, 1)
-                    
+
                 hidden_states = torch.cat([layer_memory[non_empty_mask], hidden_states], dim=1)
                 if attention_mask is not None:
                     layer_attention_mask = torch.cat((attention_mask[:, :, :, :rmt_parent.num_mem_tokens], attention_mask), dim=-1)
@@ -87,7 +85,7 @@ def horizontal_memory_forward(
                 )
 
         hidden_states = layer_outputs[0]
-        
+
         ### shorten hidden states
         if i in rmt_parent.memory_storage:
             hidden_states = hidden_states[:, rmt_parent.num_mem_tokens:]
@@ -100,7 +98,7 @@ def horizontal_memory_forward(
 
             updated_memory = memory_layer_hidden_states[:, rmt_parent.memory_position]
             hidden_states[:, rmt_parent.memory_position] = updated_memory
-        
+
         ### set layer memory
         if layer_memory is not None:
             layer_memory[non_empty_mask] = hidden_states[:, rmt_parent.memory_position].detach()
@@ -118,8 +116,16 @@ def horizontal_memory_forward(
     if output_hidden_states:
         all_hidden_states = all_hidden_states + (hidden_states,)
 
-    if not return_dict:
-        return tuple(
+    return (
+        BaseModelOutputWithPastAndCrossAttentions(
+            last_hidden_state=hidden_states,
+            past_key_values=next_decoder_cache,
+            hidden_states=all_hidden_states,
+            attentions=all_self_attentions,
+            cross_attentions=all_cross_attentions,
+        )
+        if return_dict
+        else tuple(
             v
             for v in [
                 hidden_states,
@@ -130,12 +136,6 @@ def horizontal_memory_forward(
             ]
             if v is not None
         )
-    return BaseModelOutputWithPastAndCrossAttentions(
-        last_hidden_state=hidden_states,
-        past_key_values=next_decoder_cache,
-        hidden_states=all_hidden_states,
-        attentions=all_self_attentions,
-        cross_attentions=all_cross_attentions,
     )
 
 
@@ -174,7 +174,7 @@ def deberta_horizontal_memory_forward(
             non_empty_mask = rmt_parent.memory_storage['non_empty_mask']
             if layer_memory.shape[0] == 1:
                 layer_memory = layer_memory.repeat(len(non_empty_mask), 1, 1)
-                
+
             hidden_states = torch.cat([layer_memory[non_empty_mask], hidden_states], dim=1)
             if attention_mask is not None:
                 layer_attention_mask = torch.cat((attention_mask, attention_mask[:, :, :, :rmt_parent.num_mem_tokens]), dim=-1)
@@ -192,7 +192,7 @@ def deberta_horizontal_memory_forward(
             relative_pos=relative_pos,
             rel_embeddings=rel_embeddings,
         )
-        
+
         ### Update memory
         if rmt_parent.memory_layers is not None:
             memory_layer = rmt_parent.memory_layers[i]
@@ -208,7 +208,7 @@ def deberta_horizontal_memory_forward(
         if output_attentions:
             hidden_states, att_m = hidden_states
             memory_layer_out, memory_attentions = memory_layer_out
-        
+
         ### shorten hidden states
         if i in rmt_parent.memory_storage:
             hidden_states = hidden_states[:, rmt_parent.num_mem_tokens:]
@@ -221,7 +221,7 @@ def deberta_horizontal_memory_forward(
 
             updated_memory = memory_layer_hidden_states[:, rmt_parent.memory_position]
             hidden_states[:, rmt_parent.memory_position] = updated_memory
-        
+
         ### set layer memory
         if layer_memory is not None:
             layer_memory[non_empty_mask] = hidden_states[:, rmt_parent.memory_position].detach()
@@ -242,8 +242,16 @@ def deberta_horizontal_memory_forward(
     if output_hidden_states:
         all_hidden_states = all_hidden_states + (hidden_states,)
 
-    if not return_dict:
-        return tuple(v for v in [hidden_states, all_hidden_states, all_attentions] if v is not None)
-    return BaseModelOutput(
-        last_hidden_state=hidden_states, hidden_states=all_hidden_states, attentions=all_attentions
+    return (
+        BaseModelOutput(
+            last_hidden_state=hidden_states,
+            hidden_states=all_hidden_states,
+            attentions=all_attentions,
+        )
+        if return_dict
+        else tuple(
+            v
+            for v in [hidden_states, all_hidden_states, all_attentions]
+            if v is not None
+        )
     )

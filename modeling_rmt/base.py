@@ -52,7 +52,7 @@ class RMTBaseModel(torch.nn.Module):
     def pad_and_segment(self, input_ids):
         segmented_batch = []
         for seq in input_ids:
-            drop_mask = sum([seq == t for t in self.special_token_ids])
+            drop_mask = sum(seq == t for t in self.special_token_ids)
             seq = seq[(1 - drop_mask).bool()]
             seq = seq[:self.segment_size * self.rmt_config['max_n_segments']]
 
@@ -76,9 +76,10 @@ class RMTBaseModel(torch.nn.Module):
 
             segmented_batch.append(input_segments)
 
-        segmented_batch = [[sample[seg_num] for sample in segmented_batch] \
-                            for seg_num in range(self.rmt_config['max_n_segments'])]
-        return segmented_batch
+        return [
+            [sample[seg_num] for sample in segmented_batch]
+            for seg_num in range(self.rmt_config['max_n_segments'])
+        ]
 
     def pad_add_special_tokens(self, **kwargs):
         raise NotImplementedError
@@ -115,7 +116,7 @@ class RMTBaseModel(torch.nn.Module):
         extracted = {}
         for seg_num, out in enumerate(model_outputs):
             for key, value in out.items():
-                if any([sk in key for sk in segment_keys]):
+                if any(sk in key for sk in segment_keys):
                     extracted[f'{key}_{seg_num}'] = value
 
         if self.rmt_config['sum_loss']:
@@ -124,7 +125,7 @@ class RMTBaseModel(torch.nn.Module):
 
         for key, value in extracted.items():
             rmt_out[key] = value
-        
+
         # drop unnecessary hiddens to save memory
         if not output_hidden_states:
             for key in rmt_out.keys():

@@ -50,7 +50,7 @@ def memory_layers_forward(
 
     # required mask seq length can be calculated via length of past
     mask_seq_length = past_key_values[0][0].shape[2] + seq_length if past_key_values is not None else seq_length
-    
+
 
     if use_cache is True:
         assert self.is_decoder, f"`use_cache` can only be set to `True` if {self} is used as a decoder"
@@ -135,7 +135,7 @@ def memory_layers_forward(
                 use_cache=use_cache,
                 output_attentions=output_attentions,
             )
-            
+
             ### Update memory
             memory_layer = rmt_parent.memory_layers[i]
             memory_layer_out = memory_layer(hidden_states, 
@@ -158,7 +158,7 @@ def memory_layers_forward(
             layer_outputs = layer_outputs[:1] + (None,) + layer_outputs[1:]
 
         hidden_states, present_key_value_state = layer_outputs[:2]
-        
+
         hidden_states[:, rmt_parent.memory_position] = memory
 
         # We share the position biases between the layers - the first layer store them
@@ -179,8 +179,8 @@ def memory_layers_forward(
         # Model Parallel: If it's the last layer for that device, put things on the next device
         if self.model_parallel:
             for k, v in self.device_map.items():
-                if i == v[-1] and "cuda:" + str(k) != self.last_device:
-                    hidden_states = hidden_states.to("cuda:" + str(k + 1))
+                if i == v[-1] and f"cuda:{str(k)}" != self.last_device:
+                    hidden_states = hidden_states.to(f"cuda:{str(k + 1)}")
 
     hidden_states = self.final_layer_norm(hidden_states)
     hidden_states = self.dropout(hidden_states)
@@ -189,8 +189,16 @@ def memory_layers_forward(
     if output_hidden_states:
         all_hidden_states = all_hidden_states + (hidden_states,)
 
-    if not return_dict:
-        return tuple(
+    return (
+        BaseModelOutputWithPastAndCrossAttentions(
+            last_hidden_state=hidden_states,
+            past_key_values=present_key_value_states,
+            hidden_states=all_hidden_states,
+            attentions=all_attentions,
+            cross_attentions=all_cross_attentions,
+        )
+        if return_dict
+        else tuple(
             v
             for v in [
                 hidden_states,
@@ -201,10 +209,4 @@ def memory_layers_forward(
             ]
             if v is not None
         )
-    return BaseModelOutputWithPastAndCrossAttentions(
-        last_hidden_state=hidden_states,
-        past_key_values=present_key_value_states,
-        hidden_states=all_hidden_states,
-        attentions=all_attentions,
-        cross_attentions=all_cross_attentions,
     )

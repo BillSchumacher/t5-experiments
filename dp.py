@@ -144,10 +144,7 @@ class TorchTransformersPreprocessor(Component):
     def __call__(self, texts_a: List[str], texts_b: Optional[List[str]] = None) -> Union[
             List[InputFeatures], Tuple[List[InputFeatures], List[List[str]]]]:
 
-        if texts_b is None:
-            batch_text = texts_a
-        else:
-            batch_text = zip(texts_a, texts_b)
+        batch_text = texts_a if texts_b is None else zip(texts_a, texts_b)
         batch_text = list(batch_text)
 
         # use batch encode plus and reduce paddings
@@ -170,10 +167,7 @@ class TorchTransformersPreprocessor(Component):
             if self.return_tokens:
                 tokens.append(self.tokenizer.convert_ids_to_tokens(encoded_dict['input_ids'][0]))
 
-        if self.return_tokens:
-            return input_features, tokens
-        else:
-            return input_features
+        return (input_features, tokens) if self.return_tokens else input_features
 
 
 class T5Text2TextModel(TorchModel):
@@ -347,14 +341,13 @@ class T5Text2TextModel(TorchModel):
                 p_batch_tokens = p_batch_tokens.cpu().numpy().tolist()
                 predicted_tokens += p_batch_tokens
 
-        # warning: conversion from indices to tokens should be done we the same vocabulary as in pipeline
-        # (currently we use only HFT tokenizer)
-        # but we might use post-processor from t5tasks in next pipeline step
-        # or just self.tokenizer.decode(tokens, skip_special_tokens=True)?
-        predictions = [self.tokenizer.decode(tokens).replace('<pad>', '').replace('</s>', '').strip()
-                       for tokens in predicted_tokens]
-
-        return predictions
+        return [
+            self.tokenizer.decode(tokens)
+            .replace('<pad>', '')
+            .replace('</s>', '')
+            .strip()
+            for tokens in predicted_tokens
+        ]
 
     @overrides
     def process_event(self, event_name: str, data: dict) -> None:
@@ -372,14 +365,18 @@ class T5Text2TextModel(TorchModel):
         if event_name == "after_epoch":
             self.epochs_done += 1
 
-        if event_name == "after_validation" and 'impatience' in data and self.learning_rate_drop_patience:
-            if data['impatience'] == self.learning_rate_drop_patience:
-                log.info(f"----------Current LR is decreased in {self.learning_rate_drop_div} times----------")
-                if self.load_before_drop:
-                    self.load(self.save_path)
-                    self.model.eval()
-                for param_group in self.optimizer.param_groups:
-                    param_group['lr'] = max(param_group['lr'] / self.learning_rate_drop_div, self.min_learning_rate)
+        if (
+            event_name == "after_validation"
+            and 'impatience' in data
+            and self.learning_rate_drop_patience
+            and data['impatience'] == self.learning_rate_drop_patience
+        ):
+            log.info(f"----------Current LR is decreased in {self.learning_rate_drop_div} times----------")
+            if self.load_before_drop:
+                self.load(self.save_path)
+                self.model.eval()
+            for param_group in self.optimizer.param_groups:
+                param_group['lr'] = max(param_group['lr'] / self.learning_rate_drop_div, self.min_learning_rate)
 
     @overrides
     def save(self, fname: Optional[Union[str, Path]] = None, *args, **kwargs) -> None:

@@ -43,30 +43,29 @@ def expand_dp_path(path, variables):
 
 def hvd_dp_run(config, fn=evaluate_model, check_metrics=False):
     config = deepcopy(config)
-    if n_gpus > 1:
-        config['train']['class_name'] = 'dp_hvd_trainer:HvdTorchNNTrainer'
-        # hvd and gradient accumulation do not work together in DP currently
-        config['chainer']['pipe'][2]['sub_batch_size'] = None
-        metrics = hvd_run(fn, args=(config,), np=n_gpus, use_gloo=True)
-        # check that metrics from all workers are equal
-        if check_metrics:
-            splits = list(metrics[0].keys())
-            if len(splits) == 0:
-                logger.info(f'no evaluation splits were found in metrics: {metrics}')
-                return {}
-            metrics_names = metrics[0][splits[0]].keys()
-            if len(metrics_names) == 0:
-                logger.info(f'no metrics were found in evaluation results: {metrics}')
-                return {}
-            for split in splits:
-                for name in metrics_names:
-                    if len(set([m[split][name] for m in metrics])) > 1:
-                        print(metrics)
-                        logger.info('metrics should be equal for all hvd workers! stopping...')
-                        exit(1)
-        return metrics[0]
-    else:
+    if n_gpus <= 1:
         return fn(config)
+    config['train']['class_name'] = 'dp_hvd_trainer:HvdTorchNNTrainer'
+    # hvd and gradient accumulation do not work together in DP currently
+    config['chainer']['pipe'][2]['sub_batch_size'] = None
+    metrics = hvd_run(fn, args=(config,), np=n_gpus, use_gloo=True)
+        # check that metrics from all workers are equal
+    if check_metrics:
+        splits = list(metrics[0].keys())
+        if not splits:
+            logger.info(f'no evaluation splits were found in metrics: {metrics}')
+            return {}
+        metrics_names = metrics[0][splits[0]].keys()
+        if len(metrics_names) == 0:
+            logger.info(f'no metrics were found in evaluation results: {metrics}')
+            return {}
+        for split in splits:
+            for name in metrics_names:
+                if len({m[split][name] for m in metrics}) > 1:
+                    print(metrics)
+                    logger.info('metrics should be equal for all hvd workers! stopping...')
+                    exit(1)
+    return metrics[0]
 
 
 def evaluate_checkpoint(pretrained_checkpoint: str,
@@ -259,7 +258,9 @@ def single(task_config: Path = typer.Option(...),
     for task in task_configs:
         logger.info(f'\t{task.name}')
 
-    train_subbatch_size = train_batch_size if not train_subbatch_size else train_subbatch_size
+    train_subbatch_size = (
+        train_subbatch_size if train_subbatch_size else train_batch_size
+    )
 
     results = []
     for config_path in tqdm(task_configs, smoothing=0.0):
@@ -269,7 +270,7 @@ def single(task_config: Path = typer.Option(...),
                                            learning_rate=learning_rate
                                            )
         eval_results['is_mixture'] = False
-        if not str(pretrained_checkpoint) in T5_PRETRAINED_MODEL_ARCHIVE_LIST:
+        if str(pretrained_checkpoint) not in T5_PRETRAINED_MODEL_ARCHIVE_LIST:
             pd.DataFrame([eval_results]).to_csv(pretrained_checkpoint.parent /
                                                 eval_results['finetuned_model'] / 'metrics.csv')
         else:
@@ -365,7 +366,7 @@ def collect_metrics(pretrained_checkpoint: Path = typer.Option(...),
                 if any(str(p).endswith(bm) for bm in results['ckpt_path']):
                     if not any(str(p).endswith(bm) for bm in best_models) and 'best_ckpts' not in str(p):
                         logger.info(f'  DELETE   - {p}')
-                        delete = False if not force else True
+                        delete = force
                         if not force:
                             delete = typer.confirm("Do you really want to delete?")
                         if delete:

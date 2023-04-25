@@ -212,10 +212,7 @@ class Trainer:
                                f'clip_grad_norm = {self.args.clip_grad_norm}, '
                                f'clip_grad_value = {self.args.clip_grad_value}.')
 
-        self.clip_grad = False
-        if self.args.clip_grad_norm or self.args.clip_grad_value:
-            self.clip_grad = True
-
+        self.clip_grad = bool(self.args.clip_grad_norm or self.args.clip_grad_value)
         self.args.optimize_mode = getattr(self.args, 'optimize_mode', 'min')
         self.args.optimize_metric = getattr(self.args, 'optimize_metric', 'loss')
         if self.args.optimize_mode == 'min':
@@ -430,10 +427,13 @@ class Trainer:
         # get gradients global norm (in the same way as in torch.nn.utils.clip_grad_norm_)
         params = self.amp.master_params(self.optimizer) if self.use_apex_amp else self.model.parameters()
         params = [p for p in params if p.grad is not None]
-        if len(params) == 0:
-            return 0.0
-        total_norm = torch.linalg.norm(torch.stack([torch.linalg.norm(p.grad.detach()) for p in params])).item()
-        return total_norm
+        return (
+            torch.linalg.norm(
+                torch.stack([torch.linalg.norm(p.grad.detach()) for p in params])
+            ).item()
+            if params
+            else 0.0
+        )
 
     def _train_batch_generator(self):
         while self.n_iter <= self.args.iters:
@@ -552,7 +552,7 @@ class Trainer:
             if len(metrics.keys() & m.keys()) != 0:
                 self._log_warning(f'metrics ({m.keys()}) and batch-lvl metrics ({metrics.keys()}) have common names. '
                                   f'Batch-lvl metric value would be overwritten.')
-            metrics.update(m)
+            metrics |= m
         self._reset_batch_metrics(split)
         self._reset_metrics_data(split)
         return metrics
@@ -621,7 +621,7 @@ class Trainer:
                                 self.tb.add_scalar(f'{p}/samples/param_group_{j}', param_group[p],
                                                    self.n_iter * self.global_batch_size)
                     # log gradients global norm
-                    gnorm = np.mean(global_grad_norms) if len(global_grad_norms) > 0 else 0
+                    gnorm = np.mean(global_grad_norms) if global_grad_norms else 0
                     if self.tb:
                         self.tb.add_scalar('gradients_global_norm/iterations', gnorm, self.n_iter)
                         self.tb.add_scalar('gradients_global_norm/samples', gnorm, self.n_iter * self.global_batch_size)
@@ -659,7 +659,7 @@ class Trainer:
                               })
 
             if self.args.early_stopping_patience is not None and \
-                    self.early_stopping_counter > self.args.early_stopping_patience:
+                        self.early_stopping_counter > self.args.early_stopping_patience:
                 self._log_info('Early stopping triggered: stopping training...')
                 break
 
@@ -734,23 +734,24 @@ class Trainer:
 
     @rank_0
     def save(self, save_path, suffix='', metrics=None) -> None:
-        if save_path is not None:
-            if suffix == '':
-                save_path = f'{save_path}/model_{self.n_iter}.pth'
-            else:
-                save_path = f'{save_path}/model_{suffix}.pth'
-            to_save = {
-                "model_state_dict": self.model.state_dict(),
-                "optimizer_state_dict": self.optimizer.state_dict(),
-                "iteration": self.n_iter,
-                "epoch": self.n_epoch}
-            if metrics:
-                to_save['metrics'] = metrics
-            if self.use_apex_amp:
-                to_save['amp'] = self.amp.state_dict()
-            if self.use_torch_amp:
-                to_save['torch_amp'] = self.amp_grad_scaler.state_dict()
-            if self.lr_scheduler:
-                to_save['lr_scheduler_state_dict'] = self.lr_scheduler.state_dict()
-            torch.save(to_save, save_path)
-            self._log_info(f'Model was saved to {save_path}')
+        if save_path is None:
+            return
+        if suffix == '':
+            save_path = f'{save_path}/model_{self.n_iter}.pth'
+        else:
+            save_path = f'{save_path}/model_{suffix}.pth'
+        to_save = {
+            "model_state_dict": self.model.state_dict(),
+            "optimizer_state_dict": self.optimizer.state_dict(),
+            "iteration": self.n_iter,
+            "epoch": self.n_epoch}
+        if metrics:
+            to_save['metrics'] = metrics
+        if self.use_apex_amp:
+            to_save['amp'] = self.amp.state_dict()
+        if self.use_torch_amp:
+            to_save['torch_amp'] = self.amp_grad_scaler.state_dict()
+        if self.lr_scheduler:
+            to_save['lr_scheduler_state_dict'] = self.lr_scheduler.state_dict()
+        torch.save(to_save, save_path)
+        self._log_info(f'Model was saved to {save_path}')

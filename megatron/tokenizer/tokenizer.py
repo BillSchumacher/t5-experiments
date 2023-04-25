@@ -27,8 +27,7 @@ from .gpt2_tokenization import GPT2Tokenizer
 def build_tokenizer(args):
     """Initialize tokenizer."""
     if args.rank == 0:
-        print('> building {} tokenizer ...'.format(args.tokenizer_type),
-              flush=True)
+        print(f'> building {args.tokenizer_type} tokenizer ...', flush=True)
 
     # Select and instantiate the tokenizer.
     if args.tokenizer_type == 'BertWordPieceLowerCase':
@@ -63,8 +62,9 @@ def build_tokenizer(args):
             print("vocab file is un-used. loading tokenizer from pre-trained model")
         tokenizer = _HFAutoTokenizer(args.tokenizer_name_or_path)
     else:
-        raise NotImplementedError('{} tokenizer is not '
-                                  'implemented.'.format(args.tokenizer_type))
+        raise NotImplementedError(
+            f'{args.tokenizer_type} tokenizer is not implemented.'
+        )
 
     # Add vocab size.
     args.padded_vocab_size = _vocab_size_with_padding(tokenizer.vocab_size,
@@ -83,9 +83,10 @@ def _vocab_size_with_padding(orig_vocab_size, args):
     while (after % multiple) != 0:
         after += 1
     if args.rank == 0:
-        print(' > padded vocab (size: {}) with {} dummy tokens '
-              '(new size: {})'.format(
-                  orig_vocab_size, after - orig_vocab_size, after), flush=True)
+        print(
+            f' > padded vocab (size: {orig_vocab_size}) with {after - orig_vocab_size} dummy tokens (new size: {after})',
+            flush=True,
+        )
     return after
 
 
@@ -118,43 +119,36 @@ class AbstractTokenizer(ABC):
         pass
 
     def detokenize(self, token_ids):
-        raise NotImplementedError('detokenizer is not implemented for {} '
-                                  'tokenizer'.format(self.name))
+        raise NotImplementedError(
+            f'detokenizer is not implemented for {self.name} tokenizer'
+        )
 
     @property
     def cls(self):
-        raise NotImplementedError('CLS is not provided for {} '
-                                  'tokenizer'.format(self.name))
+        raise NotImplementedError(f'CLS is not provided for {self.name} tokenizer')
 
     @property
     def sep(self):
-        raise NotImplementedError('SEP is not provided for {} '
-                                  'tokenizer'.format(self.name))
+        raise NotImplementedError(f'SEP is not provided for {self.name} tokenizer')
 
     @property
     def pad(self):
-        raise NotImplementedError('PAD is not provided for {} '
-                                  'tokenizer'.format(self.name))
+        raise NotImplementedError(f'PAD is not provided for {self.name} tokenizer')
 
     @property
     def eod(self):
-        raise NotImplementedError('EOD is not provided for {} '
-                                  'tokenizer'.format(self.name))
+        raise NotImplementedError(f'EOD is not provided for {self.name} tokenizer')
 
     @property
     def mask(self):
-        raise NotImplementedError('MASK is not provided for {} '
-                                  'tokenizer'.format(self.name))
+        raise NotImplementedError(f'MASK is not provided for {self.name} tokenizer')
 
 
 class _BertWordPieceTokenizer(AbstractTokenizer):
     """Original BERT wordpiece tokenizer."""
 
     def __init__(self, vocab_file, lower_case=True, vocab_extra_ids=0):
-        if lower_case:
-            name = 'BERT Lower Case'
-        else:
-            name = 'BERT Upper Case'
+        name = 'BERT Lower Case' if lower_case else 'BERT Upper Case'
         super().__init__(name)
         self.tokenizer = FullBertTokenizer(vocab_file, do_lower_case=lower_case)
         self.cls_id = self.tokenizer.vocab['[CLS]']
@@ -176,9 +170,7 @@ class _BertWordPieceTokenizer(AbstractTokenizer):
 
         # (dsachan) Add additional special tokens
         # These can be used as sentinel tokens in T5 model inputs
-        additional_special_tokens = []
-        additional_special_tokens.extend(
-            ["<extra_id_{}>".format(i) for i in range(vocab_extra_ids)])
+        additional_special_tokens = [f"<extra_id_{i}>" for i in range(vocab_extra_ids)]
         self.add_additional_special_tokens(additional_special_tokens)
 
     def add_token(self, token):
@@ -218,14 +210,7 @@ class _BertWordPieceTokenizer(AbstractTokenizer):
         exclude_list = ['[PAD]', '[CLS]']
         non_pads = [t for t in tokens if t not in exclude_list]
 
-        result = ""
-        for s in non_pads:
-            if s.startswith("##"):
-                result += s[2:]
-            else:
-                result += " " + s
-
-        return result
+        return "".join(s[2:] if s.startswith("##") else f" {s}" for s in non_pads)
 
     @property
     def cls(self):

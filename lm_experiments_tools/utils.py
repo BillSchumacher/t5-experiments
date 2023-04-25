@@ -58,11 +58,15 @@ def get_fn_param_names(fn) -> List[str]:
     Returns:
         List[str]: list of function parameters names
     """
-    params = []
-    for p in inspect.signature(fn).parameters.values():
-        if p.kind not in [inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD]:
-            params += [p.name]
-    return params
+    return [
+        p.name
+        for p in inspect.signature(fn).parameters.values()
+        if p.kind
+        not in [
+            inspect.Parameter.VAR_POSITIONAL,
+            inspect.Parameter.VAR_KEYWORD,
+        ]
+    ]
 
 
 def get_optimizer(name: str):
@@ -98,17 +102,14 @@ def collect_run_configuration(args, env_vars=['CUDA_VISIBLE_DEVICES']):
 def get_distributed_rank() -> int:
     if torch.distributed.is_initialized():
         return torch.distributed.get_rank()
-    if hvd.is_initialized():
-        return hvd.rank()
-    return 0
+    return hvd.rank() if hvd.is_initialized() else 0
 
 
 def rank_0(fn):
     @functools.wraps(fn)
     def rank_0_wrapper(*args, **kwargs):
-        if get_distributed_rank() == 0:
-            return fn(*args, **kwargs)
-        return None
+        return fn(*args, **kwargs) if get_distributed_rank() == 0 else None
+
     return rank_0_wrapper
 
 

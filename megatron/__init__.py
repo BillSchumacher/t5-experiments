@@ -54,6 +54,4 @@ def print_rank_last(message):
 def get_distributed_rank():
     if torch.distributed.is_initialized():
         return torch.distributed.get_rank()
-    if hvd.is_initialized():
-        return hvd.rank()
-    return 0
+    return hvd.rank() if hvd.is_initialized() else 0
