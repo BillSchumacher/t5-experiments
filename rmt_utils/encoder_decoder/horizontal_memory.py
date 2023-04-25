@@ -51,7 +51,7 @@ def horizontal_memory_forward(
     # required mask seq length can be calculated via length of past
     mask_seq_length = past_key_values[0][0].shape[2] + seq_length if past_key_values is not None else seq_length
     # mask_seq_length += rmt_parent.num_mem_tokens
-    
+
     # print('mask_seq_length', mask_seq_length)
 
     if use_cache is True:
@@ -59,13 +59,13 @@ def horizontal_memory_forward(
 
     if attention_mask is None:
         attention_mask = torch.ones(batch_size, mask_seq_length).to(inputs_embeds.device)
-        
-    
+
+
     memory_len = rmt_parent.num_mem_tokens
     memory_attention_mask = torch.ones_like(attention_mask)[:, :memory_len]
     attention_mask = torch.cat([memory_attention_mask, attention_mask], dim=-1)
 
-    
+
     if self.is_decoder and encoder_attention_mask is None and encoder_hidden_states is not None:
         encoder_seq_length = encoder_hidden_states.shape[1]
         encoder_attention_mask = torch.ones(
@@ -136,13 +136,13 @@ def horizontal_memory_forward(
                 non_empty_mask = rmt_parent.memory_storage['non_empty_mask']
                 if layer_memory.shape[0] == 1:
                     layer_memory = layer_memory.repeat(len(non_empty_mask), 1, 1)
-                
+
                 hidden_states = torch.cat([layer_memory[non_empty_mask], hidden_states], dim=1)
                 layer_attention_mask = extended_attention_mask
             else:
                 layer_memory = None
                 layer_attention_mask = extended_attention_mask[:, :, :, rmt_parent.num_mem_tokens:]
-                
+
             layer_outputs = layer_module(
                 hidden_states,
                 attention_mask=layer_attention_mask,
@@ -177,19 +177,19 @@ def horizontal_memory_forward(
             layer_outputs = layer_outputs[:1] + (None,) + layer_outputs[1:]
 
         hidden_states, present_key_value_state = layer_outputs[:2]
-        
+
         #!! shorten hidden states
         if i in rmt_parent.memory_storage:
             hidden_states = hidden_states[:, memory_len:]
-        
+
         if rmt_parent.memory_layers is not None:
             memory_layer_hidden_states = memory_layer_out[0]
             if i in rmt_parent.memory_storage:
                 memory_layer_hidden_states = memory_layer_hidden_states[:, memory_len:]
             updated_memory = memory_layer_hidden_states[:, rmt_parent.memory_position]
-            
+
             hidden_states[:, rmt_parent.memory_position] = updated_memory
-        
+
         if layer_memory is not None:
             layer_memory[non_empty_mask] = hidden_states[:, rmt_parent.memory_position].detach()
         else:
@@ -214,8 +214,8 @@ def horizontal_memory_forward(
         # Model Parallel: If it's the last layer for that device, put things on the next device
         if self.model_parallel:
             for k, v in self.device_map.items():
-                if i == v[-1] and "cuda:" + str(k) != self.last_device:
-                    hidden_states = hidden_states.to("cuda:" + str(k + 1))
+                if i == v[-1] and f"cuda:{str(k)}" != self.last_device:
+                    hidden_states = hidden_states.to(f"cuda:{str(k + 1)}")
 
     hidden_states = self.final_layer_norm(hidden_states)
     hidden_states = self.dropout(hidden_states)
@@ -224,8 +224,16 @@ def horizontal_memory_forward(
     if output_hidden_states:
         all_hidden_states = all_hidden_states + (hidden_states,)
 
-    if not return_dict:
-        return tuple(
+    return (
+        BaseModelOutputWithPastAndCrossAttentions(
+            last_hidden_state=hidden_states,
+            past_key_values=present_key_value_states,
+            hidden_states=all_hidden_states,
+            attentions=all_attentions,
+            cross_attentions=all_cross_attentions,
+        )
+        if return_dict
+        else tuple(
             v
             for v in [
                 hidden_states,
@@ -236,12 +244,6 @@ def horizontal_memory_forward(
             ]
             if v is not None
         )
-    return BaseModelOutputWithPastAndCrossAttentions(
-        last_hidden_state=hidden_states,
-        past_key_values=present_key_value_states,
-        hidden_states=all_hidden_states,
-        attentions=all_attentions,
-        cross_attentions=all_cross_attentions,
     )
 
 
@@ -296,7 +298,7 @@ def horizontal_memory_forward_1by1(
     # required mask seq length can be calculated via length of past
     mask_seq_length = past_key_values[0][0].shape[2] + seq_length if past_key_values is not None else seq_length
     # mask_seq_length += rmt_parent.num_mem_tokens
-    
+
     # print('mask_seq_length', mask_seq_length)
 
     if use_cache is True:
@@ -304,13 +306,13 @@ def horizontal_memory_forward_1by1(
 
     if attention_mask is None:
         attention_mask = torch.ones(batch_size, mask_seq_length).to(inputs_embeds.device)
-        
-    
+
+
     memory_len = rmt_parent.num_mem_tokens
     memory_attention_mask = torch.clone(attention_mask)[:, :memory_len]
     attention_mask = torch.cat([memory_attention_mask, attention_mask], dim=-1)
 
-    
+
     if self.is_decoder and encoder_attention_mask is None and encoder_hidden_states is not None:
         encoder_seq_length = encoder_hidden_states.shape[1]
         encoder_attention_mask = torch.ones(
@@ -381,13 +383,13 @@ def horizontal_memory_forward_1by1(
                 non_empty_mask = rmt_parent.memory_storage['non_empty_mask']
                 if layer_memory.shape[0] == 1:
                     layer_memory = layer_memory.repeat(len(non_empty_mask), 1, 1)
-                
+
                 hidden_states = torch.cat([layer_memory[non_empty_mask], hidden_states], dim=1)
                 layer_attention_mask = extended_attention_mask
             else:
                 layer_memory = None
                 layer_attention_mask = extended_attention_mask[:, :, :, rmt_parent.num_mem_tokens:]
-                
+
             layer_outputs = layer_module(
                 hidden_states,
                 attention_mask=layer_attention_mask,
@@ -422,19 +424,19 @@ def horizontal_memory_forward_1by1(
             layer_outputs = layer_outputs[:1] + (None,) + layer_outputs[1:]
 
         hidden_states, present_key_value_state = layer_outputs[:2]
-        
+
         #!! shorten hidden states
         if i in rmt_parent.memory_storage:
             hidden_states = hidden_states[:, memory_len:]
-        
+
         if rmt_parent.memory_layers is not None:
             memory_layer_hidden_states = memory_layer_out[0]
             if i in rmt_parent.memory_storage:
                 memory_layer_hidden_states = memory_layer_hidden_states[:, memory_len:]
             updated_memory = memory_layer_hidden_states[:, rmt_parent.memory_position]
-            
+
             hidden_states[:, rmt_parent.memory_position] = updated_memory
-        
+
         if layer_memory is not None:
             layer_memory[non_empty_mask] = hidden_states[:, rmt_parent.memory_position].detach()
         else:
@@ -459,8 +461,8 @@ def horizontal_memory_forward_1by1(
         # Model Parallel: If it's the last layer for that device, put things on the next device
         if self.model_parallel:
             for k, v in self.device_map.items():
-                if i == v[-1] and "cuda:" + str(k) != self.last_device:
-                    hidden_states = hidden_states.to("cuda:" + str(k + 1))
+                if i == v[-1] and f"cuda:{str(k)}" != self.last_device:
+                    hidden_states = hidden_states.to(f"cuda:{str(k + 1)}")
 
     hidden_states = self.final_layer_norm(hidden_states)
     hidden_states = self.dropout(hidden_states)
@@ -469,8 +471,16 @@ def horizontal_memory_forward_1by1(
     if output_hidden_states:
         all_hidden_states = all_hidden_states + (hidden_states,)
 
-    if not return_dict:
-        return tuple(
+    return (
+        BaseModelOutputWithPastAndCrossAttentions(
+            last_hidden_state=hidden_states,
+            past_key_values=present_key_value_states,
+            hidden_states=all_hidden_states,
+            attentions=all_attentions,
+            cross_attentions=all_cross_attentions,
+        )
+        if return_dict
+        else tuple(
             v
             for v in [
                 hidden_states,
@@ -481,10 +491,4 @@ def horizontal_memory_forward_1by1(
             ]
             if v is not None
         )
-    return BaseModelOutputWithPastAndCrossAttentions(
-        last_hidden_state=hidden_states,
-        past_key_values=present_key_value_states,
-        hidden_states=all_hidden_states,
-        attentions=all_attentions,
-        cross_attentions=all_cross_attentions,
     )

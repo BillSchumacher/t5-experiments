@@ -104,8 +104,7 @@ def memory_layers_forward(self,
 
         output_shape = input_shape + (hidden_states.size(-1),)
 
-        if self.gradient_checkpointing and self.training:
-            if use_cache:
+        if self.gradient_checkpointing and self.training and use_cache:
                 # logger.warning_once(
                 #     "`use_cache=True` is incompatible with gradient checkpointing. Setting `use_cache=False`..."
                 # )
@@ -116,81 +115,82 @@ def memory_layers_forward(self,
         all_cross_attentions = () if output_attentions and self.config.add_cross_attention else None
         all_hidden_states = () if output_hidden_states else None
         for i, (block, layer_past) in enumerate(zip(self.h, past_key_values)):
-            # Model parallel
-            if self.model_parallel:
-                torch.cuda.set_device(hidden_states.device)
-                # Ensure layer_past is on same device as hidden_states (might not be correct)
-                if layer_past is not None:
-                    layer_past = tuple(past_state.to(hidden_states.device) for past_state in layer_past)
-                # Ensure that attention_mask is always on the same device as hidden_states
-                if attention_mask is not None:
-                    attention_mask = attention_mask.to(hidden_states.device)
-                if isinstance(head_mask, torch.Tensor):
-                    head_mask = head_mask.to(hidden_states.device)
-            if output_hidden_states:
-                all_hidden_states = all_hidden_states + (hidden_states,)
+                # Model parallel
+                if self.model_parallel:
+                    torch.cuda.set_device(hidden_states.device)
+                    # Ensure layer_past is on same device as hidden_states (might not be correct)
+                    if layer_past is not None:
+                        layer_past = tuple(past_state.to(hidden_states.device) for past_state in layer_past)
+                    # Ensure that attention_mask is always on the same device as hidden_states
+                    if attention_mask is not None:
+                        attention_mask = attention_mask.to(hidden_states.device)
+                    if isinstance(head_mask, torch.Tensor):
+                        head_mask = head_mask.to(hidden_states.device)
+                if output_hidden_states:
+                    all_hidden_states = all_hidden_states + (hidden_states,)
 
-            if self.gradient_checkpointing and self.training:
+                if self.gradient_checkpointing and self.training:
 
-                def create_custom_forward(module):
-                    def custom_forward(*inputs):
-                        # None for past_key_value
-                        return module(*inputs, use_cache, output_attentions)
+                    def create_custom_forward(module):
+                        def custom_forward(*inputs):
+                            # None for past_key_value
+                            return module(*inputs, use_cache, output_attentions)
 
-                    return custom_forward
+                        return custom_forward
 
-                outputs = torch.utils.checkpoint.checkpoint(
-                    create_custom_forward(block),
-                    hidden_states,
-                    None,
-                    attention_mask,
-                    head_mask[i],
-                    encoder_hidden_states,
-                    encoder_attention_mask,
-                )
-            else:
-                outputs = block(
-                    hidden_states,
-                    layer_past=layer_past,
-                    attention_mask=attention_mask,
-                    head_mask=head_mask[i],
-                    encoder_hidden_states=encoder_hidden_states,
-                    encoder_attention_mask=encoder_attention_mask,
-                    use_cache=use_cache,
-                    output_attentions=output_attentions,
-                )
-                memory_layer = rmt_parent.memory_layers[i].to(hidden_states.device)
-                memory_outputs = memory_layer(
-                    hidden_states,
-                    layer_past=layer_past,
-                    attention_mask=attention_mask,
-                    head_mask=head_mask[i],
-                    encoder_hidden_states=encoder_hidden_states,
-                    encoder_attention_mask=encoder_attention_mask,
-                    use_cache=use_cache,
-                    output_attentions=output_attentions,
-                )
-                memory = memory_outputs[0][:, rmt_parent.write_memory_position].to(hidden_states.device)
+                    outputs = torch.utils.checkpoint.checkpoint(
+                        create_custom_forward(block),
+                        hidden_states,
+                        None,
+                        attention_mask,
+                        head_mask[i],
+                        encoder_hidden_states,
+                        encoder_attention_mask,
+                    )
+                else:
+                    outputs = block(
+                        hidden_states,
+                        layer_past=layer_past,
+                        attention_mask=attention_mask,
+                        head_mask=head_mask[i],
+                        encoder_hidden_states=encoder_hidden_states,
+                        encoder_attention_mask=encoder_attention_mask,
+                        use_cache=use_cache,
+                        output_attentions=output_attentions,
+                    )
+                    memory_layer = rmt_parent.memory_layers[i].to(hidden_states.device)
+                    memory_outputs = memory_layer(
+                        hidden_states,
+                        layer_past=layer_past,
+                        attention_mask=attention_mask,
+                        head_mask=head_mask[i],
+                        encoder_hidden_states=encoder_hidden_states,
+                        encoder_attention_mask=encoder_attention_mask,
+                        use_cache=use_cache,
+                        output_attentions=output_attentions,
+                    )
+                    memory = memory_outputs[0][:, rmt_parent.write_memory_position].to(hidden_states.device)
 
-            hidden_states = outputs[0]
+                hidden_states = outputs[0]
 
-            ## set new memory
-            hidden_states[:, rmt_parent.read_memory_position] = memory
-            # hidden_states[:, rmt_parent.write_memory_position] = memory
+                ## set new memory
+                hidden_states[:, rmt_parent.read_memory_position] = memory
+                # hidden_states[:, rmt_parent.write_memory_position] = memory
 
-            if use_cache is True:
-                presents = presents + (outputs[1],)
+                if use_cache is True:
+                    presents = presents + (outputs[1],)
 
-            if output_attentions:
-                all_self_attentions = all_self_attentions + (outputs[2 if use_cache else 1],)
-                if self.config.add_cross_attention:
-                    all_cross_attentions = all_cross_attentions + (outputs[3 if use_cache else 2],)
+                if output_attentions:
+                    all_self_attentions = all_self_attentions + (outputs[2 if use_cache else 1],)
+                    if self.config.add_cross_attention:
+                        all_cross_attentions = all_cross_attentions + (outputs[3 if use_cache else 2],)
 
-            # Model Parallel: If it's the last layer for that device, put things on the next device
-            if self.model_parallel:
-                for k, v in self.device_map.items():
-                    if i == v[-1] and "cuda:" + str(k) != self.last_device:
-                        hidden_states = hidden_states.to("cuda:" + str(k + 1))
+                            # Model Parallel: If it's the last layer for that device, put things on the next device
+                if self.model_parallel:
+                        for k, v in self.device_map.items():
+                                if (i == v[-1]
+                                    and f"cuda:{str(k)}" != self.last_device):
+                                        hidden_states = hidden_states.to(f"cuda:{str(k + 1)}")
 
         hidden_states = self.ln_f(hidden_states)
 
@@ -199,20 +199,19 @@ def memory_layers_forward(self,
         if output_hidden_states:
             all_hidden_states = all_hidden_states + (hidden_states,)
 
-        if not return_dict:
-            return tuple(
-                v
-                for v in [hidden_states, presents, all_hidden_states, all_self_attentions, all_cross_attentions]
-                if v is not None
-            )
-
-        return BaseModelOutputWithPastAndCrossAttentions(
+        return (BaseModelOutputWithPastAndCrossAttentions(
             last_hidden_state=hidden_states,
             past_key_values=presents,
             hidden_states=all_hidden_states,
             attentions=all_self_attentions,
             cross_attentions=all_cross_attentions,
-        )
+        ) if return_dict else tuple(v for v in [
+            hidden_states,
+            presents,
+            all_hidden_states,
+            all_self_attentions,
+            all_cross_attentions,
+        ] if v is not None))
 
 
 
@@ -317,8 +316,7 @@ def memory_layers_forward_r2r(self,
 
         output_shape = input_shape + (hidden_states.size(-1),)
 
-        if self.gradient_checkpointing and self.training:
-            if use_cache:
+        if self.gradient_checkpointing and self.training and use_cache:
                 # logger.warning_once(
                 #     "`use_cache=True` is incompatible with gradient checkpointing. Setting `use_cache=False`..."
                 # )
@@ -329,80 +327,81 @@ def memory_layers_forward_r2r(self,
         all_cross_attentions = () if output_attentions and self.config.add_cross_attention else None
         all_hidden_states = () if output_hidden_states else None
         for i, (block, layer_past) in enumerate(zip(self.h, past_key_values)):
-            # Model parallel
-            if self.model_parallel:
-                torch.cuda.set_device(hidden_states.device)
-                # Ensure layer_past is on same device as hidden_states (might not be correct)
-                if layer_past is not None:
-                    layer_past = tuple(past_state.to(hidden_states.device) for past_state in layer_past)
-                # Ensure that attention_mask is always on the same device as hidden_states
-                if attention_mask is not None:
-                    attention_mask = attention_mask.to(hidden_states.device)
-                if isinstance(head_mask, torch.Tensor):
-                    head_mask = head_mask.to(hidden_states.device)
-            if output_hidden_states:
-                all_hidden_states = all_hidden_states + (hidden_states,)
+                # Model parallel
+                if self.model_parallel:
+                    torch.cuda.set_device(hidden_states.device)
+                    # Ensure layer_past is on same device as hidden_states (might not be correct)
+                    if layer_past is not None:
+                        layer_past = tuple(past_state.to(hidden_states.device) for past_state in layer_past)
+                    # Ensure that attention_mask is always on the same device as hidden_states
+                    if attention_mask is not None:
+                        attention_mask = attention_mask.to(hidden_states.device)
+                    if isinstance(head_mask, torch.Tensor):
+                        head_mask = head_mask.to(hidden_states.device)
+                if output_hidden_states:
+                    all_hidden_states = all_hidden_states + (hidden_states,)
 
-            if self.gradient_checkpointing and self.training:
+                if self.gradient_checkpointing and self.training:
 
-                def create_custom_forward(module):
-                    def custom_forward(*inputs):
-                        # None for past_key_value
-                        return module(*inputs, use_cache, output_attentions)
+                    def create_custom_forward(module):
+                        def custom_forward(*inputs):
+                            # None for past_key_value
+                            return module(*inputs, use_cache, output_attentions)
 
-                    return custom_forward
+                        return custom_forward
 
-                outputs = torch.utils.checkpoint.checkpoint(
-                    create_custom_forward(block),
-                    hidden_states,
-                    None,
-                    attention_mask,
-                    head_mask[i],
-                    encoder_hidden_states,
-                    encoder_attention_mask,
-                )
-            else:
-                outputs = block(
-                    hidden_states,
-                    layer_past=layer_past,
-                    attention_mask=attention_mask,
-                    head_mask=head_mask[i],
-                    encoder_hidden_states=encoder_hidden_states,
-                    encoder_attention_mask=encoder_attention_mask,
-                    use_cache=use_cache,
-                    output_attentions=output_attentions,
-                )
-                memory_layer = rmt_parent.memory_layers[i].to(hidden_states.device)
-                memory_outputs = memory_layer(
-                    hidden_states,
-                    layer_past=layer_past,
-                    attention_mask=attention_mask,
-                    head_mask=head_mask[i],
-                    encoder_hidden_states=encoder_hidden_states,
-                    encoder_attention_mask=encoder_attention_mask,
-                    use_cache=use_cache,
-                    output_attentions=output_attentions,
-                )
-                memory = memory_outputs[0][:, rmt_parent.read_memory_position].to(hidden_states.device)
+                    outputs = torch.utils.checkpoint.checkpoint(
+                        create_custom_forward(block),
+                        hidden_states,
+                        None,
+                        attention_mask,
+                        head_mask[i],
+                        encoder_hidden_states,
+                        encoder_attention_mask,
+                    )
+                else:
+                    outputs = block(
+                        hidden_states,
+                        layer_past=layer_past,
+                        attention_mask=attention_mask,
+                        head_mask=head_mask[i],
+                        encoder_hidden_states=encoder_hidden_states,
+                        encoder_attention_mask=encoder_attention_mask,
+                        use_cache=use_cache,
+                        output_attentions=output_attentions,
+                    )
+                    memory_layer = rmt_parent.memory_layers[i].to(hidden_states.device)
+                    memory_outputs = memory_layer(
+                        hidden_states,
+                        layer_past=layer_past,
+                        attention_mask=attention_mask,
+                        head_mask=head_mask[i],
+                        encoder_hidden_states=encoder_hidden_states,
+                        encoder_attention_mask=encoder_attention_mask,
+                        use_cache=use_cache,
+                        output_attentions=output_attentions,
+                    )
+                    memory = memory_outputs[0][:, rmt_parent.read_memory_position].to(hidden_states.device)
 
-            hidden_states = outputs[0]
+                hidden_states = outputs[0]
 
-            ## set new memory
-            hidden_states[:, rmt_parent.read_memory_position] = memory
+                ## set new memory
+                hidden_states[:, rmt_parent.read_memory_position] = memory
 
-            if use_cache is True:
-                presents = presents + (outputs[1],)
+                if use_cache is True:
+                    presents = presents + (outputs[1],)
 
-            if output_attentions:
-                all_self_attentions = all_self_attentions + (outputs[2 if use_cache else 1],)
-                if self.config.add_cross_attention:
-                    all_cross_attentions = all_cross_attentions + (outputs[3 if use_cache else 2],)
+                if output_attentions:
+                    all_self_attentions = all_self_attentions + (outputs[2 if use_cache else 1],)
+                    if self.config.add_cross_attention:
+                        all_cross_attentions = all_cross_attentions + (outputs[3 if use_cache else 2],)
 
-            # Model Parallel: If it's the last layer for that device, put things on the next device
-            if self.model_parallel:
-                for k, v in self.device_map.items():
-                    if i == v[-1] and "cuda:" + str(k) != self.last_device:
-                        hidden_states = hidden_states.to("cuda:" + str(k + 1))
+                            # Model Parallel: If it's the last layer for that device, put things on the next device
+                if self.model_parallel:
+                        for k, v in self.device_map.items():
+                                if (i == v[-1]
+                                    and f"cuda:{str(k)}" != self.last_device):
+                                        hidden_states = hidden_states.to(f"cuda:{str(k + 1)}")
 
         hidden_states = self.ln_f(hidden_states)
 
@@ -411,17 +410,16 @@ def memory_layers_forward_r2r(self,
         if output_hidden_states:
             all_hidden_states = all_hidden_states + (hidden_states,)
 
-        if not return_dict:
-            return tuple(
-                v
-                for v in [hidden_states, presents, all_hidden_states, all_self_attentions, all_cross_attentions]
-                if v is not None
-            )
-
-        return BaseModelOutputWithPastAndCrossAttentions(
+        return (BaseModelOutputWithPastAndCrossAttentions(
             last_hidden_state=hidden_states,
             past_key_values=presents,
             hidden_states=all_hidden_states,
             attentions=all_self_attentions,
             cross_attentions=all_cross_attentions,
-        )
+        ) if return_dict else tuple(v for v in [
+            hidden_states,
+            presents,
+            all_hidden_states,
+            all_self_attentions,
+            all_cross_attentions,
+        ] if v is not None))

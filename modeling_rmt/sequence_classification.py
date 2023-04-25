@@ -108,7 +108,7 @@ class RMTEncoderMLMMemLoss(RMTEncoderMemoryLayers):
             
     def segment_reconstruction_forward(self, memory_outputs, previous_input_ids):
         mlm_prob = self.rmt_config['mlm_prob'] if 'mlm_prob' in self.rmt_config else 0.15
-        
+
         input_embeddings = self.model.embeddings(previous_input_ids)
         input_embeddings[:, self.memory_position] = memory_outputs
 
@@ -121,9 +121,9 @@ class RMTEncoderMLMMemLoss(RMTEncoderMemoryLayers):
         rec_logits = self.rec_cls(rec_attn_out[0])
 
         loss_fct = CrossEntropyLoss(ignore_index=-100)
-        reconstruction_loss = loss_fct(rec_logits.view(-1, rec_logits.size(-1)), previous_input_ids.view(-1))
-        
-        return reconstruction_loss
+        return loss_fct(
+            rec_logits.view(-1, rec_logits.size(-1)), previous_input_ids.view(-1)
+        )
 
     def forward(self, input_ids, attention_mask=None, token_type_ids=None, position_ids=None, head_mask=None,
                 inputs_embeds=None, labels=None, output_attentions=None, output_hidden_states=None, return_dict=None):
@@ -172,7 +172,7 @@ class RMTEncoderMLMMemLoss(RMTEncoderMemoryLayers):
         extracted = {}
         for seg_num, out in enumerate(model_outputs):
             for key, value in out.items():
-                if any([sk in key for sk in segment_keys]):
+                if any(sk in key for sk in segment_keys):
                     extracted[f'{key}_{seg_num}'] = value
 
         if self.rmt_config['sum_loss']:
@@ -185,7 +185,7 @@ class RMTEncoderMLMMemLoss(RMTEncoderMemoryLayers):
         rec_coef = self.rmt_config['reconstruction_loss_coef']
         extracted['reconstruction_loss'] = reconstruction_loss
         extracted['loss'] =  reconstruction_loss * rec_coef + extracted['loss'] * (1 - rec_coef)
-        
+
 
         for key, value in extracted.items():
             rmt_out[key] = value
