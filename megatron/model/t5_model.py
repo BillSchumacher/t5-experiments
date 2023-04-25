@@ -76,11 +76,12 @@ class T5LMHead(MegatronModule):
         self.parallel_output = parallel_output
 
     def forward(self, hidden_states, word_embeddings_weight):
-        output = parallel_lm_logits(hidden_states,
-                                    word_embeddings_weight,
-                                    self.parallel_output,
-                                    bias=self.bias)
-        return output
+        return parallel_lm_logits(
+            hidden_states,
+            word_embeddings_weight,
+            self.parallel_output,
+            bias=self.bias,
+        )
 
 
 class T5Model(MegatronModule):
@@ -158,38 +159,35 @@ class T5Model(MegatronModule):
 
             if lm_labels is None:
                 return lm_logits
-            else:
-                if self.fp16_lm_cross_entropy:
-                    assert lm_logits.dtype == torch.half
-                    lm_loss = mpu.vocab_parallel_cross_entropy(lm_logits, lm_labels)
-                else:
-                    lm_loss = mpu.vocab_parallel_cross_entropy(lm_logits.float(),
-                                                               lm_labels)
-            return lm_loss
+            if not self.fp16_lm_cross_entropy:
+                return mpu.vocab_parallel_cross_entropy(
+                    lm_logits.float(), lm_labels
+                )
+            assert lm_logits.dtype == torch.half
+            return mpu.vocab_parallel_cross_entropy(lm_logits, lm_labels)
         elif self.add_decoder and not self.add_encoder:
             decoder_output, encoder_output = lm_output
             return decoder_output
         else:
-            encoder_output = lm_output
-            return encoder_output
+            return lm_output
 
     def state_dict_for_save_checkpoint(self, destination=None, prefix='',
                                        keep_vars=False):
         """For easy load when model is combined with other heads,
         add an extra key."""
 
-        state_dict_ = {}
-        state_dict_[self._language_model_key] \
-            = self.language_model.state_dict_for_save_checkpoint(
-            destination, prefix, keep_vars)
+        state_dict_ = {
+            self._language_model_key: self.language_model.state_dict_for_save_checkpoint(
+                destination, prefix, keep_vars
+            )
+        }
         if self.post_process and self.add_decoder:
             state_dict_[self._lm_head_key] \
-                = self.lm_head.state_dict_for_save_checkpoint(
+                    = self.lm_head.state_dict_for_save_checkpoint(
                 destination, prefix, keep_vars)
-         # Save word_embeddings.
         if self.post_process and not self.pre_process and self.add_decoder:
             state_dict_[self._word_embeddings_for_head_key] \
-                = self.word_embeddings.state_dict(destination, prefix, keep_vars)
+                    = self.word_embeddings.state_dict(destination, prefix, keep_vars)
         return state_dict_
 
     def load_state_dict(self, state_dict, strict=True):

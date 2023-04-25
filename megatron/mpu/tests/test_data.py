@@ -27,8 +27,9 @@ sys.path.append("../..")
 def test_broadcast_data(tensor_model_parallel_size):
 
     if torch.distributed.get_rank() == 0:
-        print('> testing broadcast_data with model parallel size {} ...'.
-              format(tensor_model_parallel_size))
+        print(
+            f'> testing broadcast_data with model parallel size {tensor_model_parallel_size} ...'
+        )
 
     mpu.initialize_model_parallel(tensor_model_parallel_size)
     torch.manual_seed(1234 + mpu.get_data_parallel_rank())

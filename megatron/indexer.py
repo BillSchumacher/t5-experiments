@@ -43,13 +43,10 @@ class IndexBuilder(object):
         """
         Load the necessary attributes: model, dataloader and empty BlockData
         """
-        only_context_model = True
-        if self.biencoder_shared_query_context_model:
-            only_context_model = False
-
+        only_context_model = not self.biencoder_shared_query_context_model
         model = get_model(get_model_provider(only_context_model=\
-            only_context_model, biencoder_shared_query_context_model=\
-            self.biencoder_shared_query_context_model))
+                only_context_model, biencoder_shared_query_context_model=\
+                self.biencoder_shared_query_context_model))
 
         self.model = load_biencoder_checkpoint(model,
                 only_context_model=only_context_model)
@@ -59,10 +56,10 @@ class IndexBuilder(object):
 
         self.dataset = get_open_retrieval_wiki_dataset()
         self.dataloader = iter(get_one_epoch_dataloader(self.dataset, \
-            self.batch_size))
+                self.batch_size))
 
         self.evidence_embedder_obj = OpenRetreivalDataStore( \
-            load_from_path=False)
+                load_from_path=False)
 
     def track_and_report_progress(self, batch_size):
         """

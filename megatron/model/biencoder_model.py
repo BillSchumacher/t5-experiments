@@ -46,19 +46,15 @@ def biencoder_model_provider(only_query_model=False,
 
     print_rank_0('building BiEncoderModel...')
 
-    # simpler to just keep using 2 tokentypes since
-    # the LM we initialize with has 2 tokentypes
-    model = BiEncoderModel(
+    return BiEncoderModel(
         num_tokentypes=2,
         parallel_output=False,
         only_query_model=only_query_model,
         only_context_model=only_context_model,
-        biencoder_shared_query_context_model=\
-        biencoder_shared_query_context_model,
+        biencoder_shared_query_context_model=biencoder_shared_query_context_model,
         pre_process=pre_process,
-        post_process=post_process)
-
-    return model
+        post_process=post_process,
+    )
 
 
 class BiEncoderModel(MegatronModule):
@@ -134,10 +130,7 @@ class BiEncoderModel(MegatronModule):
     @staticmethod
     def embed_text(model, tokens, attention_mask, token_types):
         """Embed a batch of tokens using the model"""
-        logits = model(tokens,
-                              attention_mask,
-                              token_types)
-        return logits
+        return model(tokens, attention_mask, token_types)
 
     def state_dict_for_save_checkpoint(self, destination=None, \
         prefix='', keep_vars=False):
@@ -196,8 +189,9 @@ class BiEncoderModel(MegatronModule):
 
         checkpoint_name = get_checkpoint_name(args.bert_load, iteration, False)
         if mpu.get_data_parallel_rank() == 0:
-            print('global rank {} is loading BERT checkpoint {}'.format(
-                torch.distributed.get_rank(), checkpoint_name))
+            print(
+                f'global rank {torch.distributed.get_rank()} is loading BERT checkpoint {checkpoint_name}'
+            )
 
         # Load the checkpoint.
         try:
@@ -231,16 +225,16 @@ class BiEncoderModel(MegatronModule):
                 # give each model the same ict_head to begin with as well
                 if self.biencoder_projection_dim > 0:
                     query_proj_state_dict = \
-                        self.state_dict_for_save_checkpoint()\
-                        [self._query_key]['projection_enc']
+                            self.state_dict_for_save_checkpoint()\
+                            [self._query_key]['projection_enc']
                 fix_query_key_value_ordering(self.query_model, checkpoint_version)
 
             if self.use_context_model:
                 self.context_model.language_model.load_state_dict(model_dict)
                 if self.query_model is not None and \
-                    self.biencoder_projection_dim > 0:
+                        self.biencoder_projection_dim > 0:
                     self.context_model.projection_enc.load_state_dict\
-                        (query_proj_state_dict)
+                            (query_proj_state_dict)
                 fix_query_key_value_ordering(self.context_model, checkpoint_version)
 
 
@@ -307,14 +301,14 @@ class PretrainedBertModel(MegatronModule):
         """For easy load when model is combined with other heads,
         add an extra key."""
 
-        state_dict_ = {}
-        state_dict_[self._language_model_key] \
-            = self.language_model.state_dict_for_save_checkpoint(
-            destination, prefix, keep_vars)
-
+        state_dict_ = {
+            self._language_model_key: self.language_model.state_dict_for_save_checkpoint(
+                destination, prefix, keep_vars
+            )
+        }
         if self.biencoder_projection_dim > 0:
             state_dict_[self._projection_enc_key] = \
-                self.projection_enc.state_dict(destination, prefix, keep_vars)
+                    self.projection_enc.state_dict(destination, prefix, keep_vars)
 
         return state_dict_
 

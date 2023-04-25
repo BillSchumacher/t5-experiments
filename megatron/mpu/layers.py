@@ -122,9 +122,7 @@ def _initialize_affine_weight_cpu(weight, output_size, input_size,
 
     with torch.no_grad():
         torch.cat(my_weight_list, dim=partition_dim, out=weight)
-    if return_master_weight:
-        return master_weight
-    return None
+    return master_weight if return_master_weight else None
 
 
 class VocabParallelEmbedding(torch.nn.Module):
@@ -180,7 +178,7 @@ class VocabParallelEmbedding(torch.nn.Module):
         if self.tensor_model_parallel_size > 1:
             # Build the mask.
             input_mask = (input_ < self.vocab_start_index) | \
-                         (input_ >= self.vocab_end_index)
+                             (input_ >= self.vocab_end_index)
             # Mask the input.
             masked_input = input_.clone() - self.vocab_start_index
             masked_input[input_mask] = 0
@@ -194,9 +192,7 @@ class VocabParallelEmbedding(torch.nn.Module):
         # Mask the output embedding.
         if self.tensor_model_parallel_size > 1:
             output_parallel[input_mask, :] = 0.0
-        # Reduce across all the model parallel GPUs.
-        output = reduce_from_tensor_model_parallel_region(output_parallel)
-        return output
+        return reduce_from_tensor_model_parallel_region(output_parallel)
 
 
 class ColumnParallelLinearWithAsyncAllreduce(torch.autograd.Function):
@@ -311,7 +307,7 @@ class ColumnParallelLinear(torch.nn.Module):
 
 
     def forward(self, input_):
-        bias = self.bias if not self.skip_bias_add else None
+        bias = None if self.skip_bias_add else self.bias
 
         if self.async_tensor_model_parallel_allreduce:
             input_shape = input_.shape

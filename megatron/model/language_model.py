@@ -179,8 +179,7 @@ class Embedding(MegatronModule):
         if self.tokentype_embeddings is not None:
             raise Exception('tokentype embeddings is already initialized')
         if torch.distributed.get_rank() == 0:
-            print('adding embedding for {} tokentypes'.format(num_tokentypes),
-                  flush=True)
+            print(f'adding embedding for {num_tokentypes} tokentypes', flush=True)
         self.num_tokentypes = num_tokentypes
         self.tokentype_embeddings = torch.nn.Embedding(num_tokentypes,
                                                        self.hidden_size)
@@ -208,15 +207,17 @@ class Embedding(MegatronModule):
                                        keep_vars=False):
         """For easy load."""
 
-        state_dict_ = {}
-        state_dict_[self._word_embeddings_key] \
-            = self.word_embeddings.state_dict(destination, prefix, keep_vars)
+        state_dict_ = {
+            self._word_embeddings_key: self.word_embeddings.state_dict(
+                destination, prefix, keep_vars
+            )
+        }
         state_dict_[self._position_embeddings_key] \
-            = self.position_embeddings.state_dict(
+                = self.position_embeddings.state_dict(
                 destination, prefix, keep_vars)
         if self.num_tokentypes > 0:
             state_dict_[self._tokentype_embeddings_key] \
-                = self.tokentype_embeddings.state_dict(
+                    = self.tokentype_embeddings.state_dict(
                     destination, prefix, keep_vars)
 
         return state_dict_
@@ -228,24 +229,22 @@ class Embedding(MegatronModule):
         if self._word_embeddings_key in state_dict:
             state_dict_ = state_dict[self._word_embeddings_key]
         else:
-            # for backward compatibility.
-            state_dict_ = {}
-            for key in state_dict.keys():
-                if 'word_embeddings' in key:
-                    state_dict_[key.split('word_embeddings.')[1]] \
-                        = state_dict[key]
+            state_dict_ = {
+                key.split('word_embeddings.')[1]: state_dict[key]
+                for key in state_dict.keys()
+                if 'word_embeddings' in key
+            }
         self.word_embeddings.load_state_dict(state_dict_, strict=strict)
 
         # Position embedding.
         if self._position_embeddings_key in state_dict:
             state_dict_ = state_dict[self._position_embeddings_key]
         else:
-            # for backward compatibility.
-            state_dict_ = {}
-            for key in state_dict.keys():
-                if 'position_embeddings' in key:
-                    state_dict_[key.split('position_embeddings.')[1]] \
-                        = state_dict[key]
+            state_dict_ = {
+                key.split('position_embeddings.')[1]: state_dict[key]
+                for key in state_dict.keys()
+                if 'position_embeddings' in key
+            }
         self.position_embeddings.load_state_dict(state_dict_, strict=strict)
 
         # Tokentype embedding.
@@ -258,7 +257,7 @@ class Embedding(MegatronModule):
                 for key in state_dict.keys():
                     if 'tokentype_embeddings' in key:
                         state_dict_[key.split('tokentype_embeddings.')[1]] \
-                            = state_dict[key]
+                                = state_dict[key]
             if len(state_dict_.keys()) > 0:
                 self.tokentype_embeddings.load_state_dict(state_dict_,
                                                           strict=strict)
@@ -345,11 +344,9 @@ class TransformerLanguageModel(MegatronModule):
         else:
             self.decoder = None
 
-        if self.post_process:
-            # Pooler.
-            if self.add_pooler:
-                self.pooler = Pooler(self.hidden_size, self.init_method)
-                self._pooler_key = 'pooler'
+        if self.post_process and self.add_pooler:
+            self.pooler = Pooler(self.hidden_size, self.init_method)
+            self._pooler_key = 'pooler'
 
     def set_input_tensor(self, input_tensor):
         """ See megatron.model.transformer.set_input_tensor()"""
@@ -405,10 +402,9 @@ class TransformerLanguageModel(MegatronModule):
         else:
             encoder_output = enc_hidden_states.to(encoder_input.dtype)
 
-        if self.post_process:
-            if self.add_pooler:
-                pooled_output = self.pooler(encoder_output,
-                                            pooling_sequence_index)
+        if self.post_process and self.add_pooler:
+            pooled_output = self.pooler(encoder_output,
+                                        pooling_sequence_index)
 
         # output_enc_hidden refers to when we just need the encoder's
         # output. For example, it is helpful to compute
@@ -446,20 +442,19 @@ class TransformerLanguageModel(MegatronModule):
         state_dict_ = {}
         if self.pre_process:
             state_dict_[self._embedding_key] \
-                = self.embedding.state_dict_for_save_checkpoint(
+                    = self.embedding.state_dict_for_save_checkpoint(
                     destination, prefix, keep_vars)
         if self.add_encoder:
             state_dict_[self._encoder_key] \
-                = self.encoder.state_dict_for_save_checkpoint(
+                    = self.encoder.state_dict_for_save_checkpoint(
                     destination, prefix, keep_vars)
-        if self.post_process:
-            if self.add_pooler:
-                state_dict_[self._pooler_key] \
+        if self.post_process and self.add_pooler:
+            state_dict_[self._pooler_key] \
                     = self.pooler.state_dict_for_save_checkpoint(
-                        destination, prefix, keep_vars)
+                    destination, prefix, keep_vars)
         if self.add_decoder:
             state_dict_[self._decoder_key] \
-                = self.decoder.state_dict_for_save_checkpoint(
+                    = self.decoder.state_dict_for_save_checkpoint(
                     destination, prefix, keep_vars)
 
         return state_dict_
@@ -472,27 +467,25 @@ class TransformerLanguageModel(MegatronModule):
             if self._embedding_key in state_dict:
                 state_dict_ = state_dict[self._embedding_key]
             else:
-                # for backward compatibility.
-                state_dict_ = {}
-                for key in state_dict.keys():
-                    if '_embeddings' in key:
-                        state_dict_[key] = state_dict[key]
+                state_dict_ = {
+                    key: state_dict[key]
+                    for key in state_dict.keys()
+                    if '_embeddings' in key
+                }
             self.embedding.load_state_dict(state_dict_, strict=strict)
 
         # Encoder.
         if self.add_encoder:
             if self._encoder_key in state_dict:
                 state_dict_ = state_dict[self._encoder_key]
-            # For backward compatibility.
             elif 'transformer' in state_dict:
                 state_dict_ = state_dict['transformer']
             else:
-                # For backward compatibility.
-                state_dict_ = {}
-                for key in state_dict.keys():
-                    if 'transformer.' in key:
-                        state_dict_[key.split('transformer.')[1]] = state_dict[key]
-
+                state_dict_ = {
+                    key.split('transformer.')[1]: state_dict[key]
+                    for key in state_dict.keys()
+                    if 'transformer.' in key
+                }
             # For backward compatibility.
             state_dict_self_attention = {}
             for key in state_dict_.keys():
@@ -506,15 +499,14 @@ class TransformerLanguageModel(MegatronModule):
             self.encoder.load_state_dict(state_dict_, strict=strict)
 
         # Pooler.
-        if self.post_process:
-            if self.add_pooler:
-                assert 'pooler' in state_dict, \
+        if self.post_process and self.add_pooler:
+            assert 'pooler' in state_dict, \
                     'could not find data for pooler in the checkpoint'
-                self.pooler.load_state_dict(state_dict[self._pooler_key],
-                                            strict=strict)
+            self.pooler.load_state_dict(state_dict[self._pooler_key],
+                                        strict=strict)
         # Decoder.
         if self.add_decoder:
             assert 'decoder' in state_dict, \
-                'could not find data for pooler in the checkpoint'
+                    'could not find data for pooler in the checkpoint'
             self.decoder.load_state_dict(state_dict[self._decoder_key],
                                          strict=strict)

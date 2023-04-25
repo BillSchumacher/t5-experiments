@@ -92,10 +92,12 @@ def initialize_model_parallel(tensor_model_parallel_size_=1,
     ranks 8 to 15 belong to the second box.
     """
     if torch.distributed.get_rank() == 0:
-        print('> initializing tensor model parallel with size {}'.format(
-            tensor_model_parallel_size_))
-        print('> initializing pipeline model parallel with size {}'.format(
-            pipeline_model_parallel_size_))
+        print(
+            f'> initializing tensor model parallel with size {tensor_model_parallel_size_}'
+        )
+        print(
+            f'> initializing pipeline model parallel with size {pipeline_model_parallel_size_}'
+        )
     # Get world size and rank. Ensure some consistencies.
     assert torch.distributed.is_initialized()
     world_size = torch.distributed.get_world_size()
@@ -213,11 +215,11 @@ def initialize_model_parallel(tensor_model_parallel_size_=1,
 
 def model_parallel_is_initialized():
     """Check if model and data parallel groups are initialized."""
-    if _TENSOR_MODEL_PARALLEL_GROUP is None or \
-        _PIPELINE_MODEL_PARALLEL_GROUP is None or \
-        _DATA_PARALLEL_GROUP is None:
-        return False
-    return True
+    return (
+        _TENSOR_MODEL_PARALLEL_GROUP is not None
+        and _PIPELINE_MODEL_PARALLEL_GROUP is not None
+        and _DATA_PARALLEL_GROUP is not None
+    )
 
 
 def get_model_parallel_group():
@@ -344,10 +346,12 @@ def get_num_layers(args, is_encoder_and_decoder_model):
 
 def is_pipeline_first_stage(ignore_virtual=False):
     """Return True if in the first pipeline model-parallel stage, False otherwise."""
-    if not ignore_virtual:
-        if get_virtual_pipeline_model_parallel_world_size() is not None and \
-            get_virtual_pipeline_model_parallel_rank() != 0:
-            return False
+    if (
+        not ignore_virtual
+        and get_virtual_pipeline_model_parallel_world_size() is not None
+        and get_virtual_pipeline_model_parallel_rank() != 0
+    ):
+        return False
     return get_pipeline_model_parallel_rank() == 0
 
 
@@ -397,9 +401,7 @@ def is_pipeline_stage_before_split(rank=None):
     global _PIPELINE_MODEL_PARALLEL_SPLIT_RANK
     if _PIPELINE_MODEL_PARALLEL_SPLIT_RANK is None:
         return True
-    if rank < _PIPELINE_MODEL_PARALLEL_SPLIT_RANK:
-        return True
-    return False
+    return rank < _PIPELINE_MODEL_PARALLEL_SPLIT_RANK
 
 
 def is_pipeline_stage_after_split(rank=None):
@@ -412,9 +414,7 @@ def is_pipeline_stage_after_split(rank=None):
     global _PIPELINE_MODEL_PARALLEL_SPLIT_RANK
     if _PIPELINE_MODEL_PARALLEL_SPLIT_RANK is None:
         return True
-    if rank >= _PIPELINE_MODEL_PARALLEL_SPLIT_RANK:
-        return True
-    return False
+    return rank >= _PIPELINE_MODEL_PARALLEL_SPLIT_RANK
 
 
 def is_pipeline_stage_at_split():

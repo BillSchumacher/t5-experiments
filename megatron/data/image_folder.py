@@ -106,7 +106,11 @@ def make_dataset(
                     item = path, class_index
                     local_instances.append(item)
 
-        instances.extend(local_instances[0:int(len(local_instances) * data_per_class_fraction)])
+        instances.extend(
+            local_instances[
+                : int(len(local_instances) * data_per_class_fraction)
+            ]
+        )
 
     return instances
 
@@ -161,9 +165,9 @@ class DatasetFolder(VisionDataset):
                                     extensions,
                                     is_valid_file)
         if len(samples) == 0:
-            msg = "Found 0 files in subfolders of: {}\n".format(self.root)
+            msg = f"Found 0 files in subfolders of: {self.root}\n"
             if extensions is not None:
-                msg += "Supported extensions are: {}".format(",".join(extensions))
+                msg += f'Supported extensions are: {",".join(extensions)}'
             raise RuntimeError(msg)
 
         self.loader = loader
@@ -199,7 +203,7 @@ class DatasetFolder(VisionDataset):
             No class is a subdirectory of another.
         """
         all_classes = [d.name for d in os.scandir(dir) if d.is_dir()]
-        classes = all_classes[0:int(len(all_classes) * self.classes_fraction)]
+        classes = all_classes[:int(len(all_classes) * self.classes_fraction)]
         classes.sort()
         class_to_idx = {cls_name: i for i, cls_name in enumerate(classes)}
         return classes, class_to_idx
@@ -212,7 +216,7 @@ class DatasetFolder(VisionDataset):
             tuple: (sample, target) where target is class_index of the target class.
         """
         curr_index = index
-        for x in range(self.total):
+        for _ in range(self.total):
             try:
                 path, target = self.samples[curr_index]
                 sample = self.loader(path)

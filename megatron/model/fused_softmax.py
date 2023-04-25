@@ -171,35 +171,35 @@ class FusedScaleMaskSoftmax(nn.Module):
             and 16 < sk <= 4096  # sk must be 16 ~ 2048
             and sq % 4 == 0  # sq must be divisor of 4
             and attn_batches % 4 == 0  # np * b must be divisor of 4
-        ):
-            if 0 <= sk <= 4096:
-                batch_per_block = self.get_batch_per_block(sq, sk, b, np)
+        ) and 0 <= sk <= 4096:
+            batch_per_block = self.get_batch_per_block(sq, sk, b, np)
 
-                if self.attn_mask_type == AttnMaskType.causal:
-                    if attn_batches % batch_per_block == 0:
-                        return True
-                else:
-                    if sq % batch_per_block == 0:
-                        return True
+            if (
+                self.attn_mask_type == AttnMaskType.causal
+                and attn_batches % batch_per_block == 0
+                or self.attn_mask_type != AttnMaskType.causal
+                and sq % batch_per_block == 0
+            ):
+                return True
         return False
 
     def forward_fused_softmax(self, input, mask):
         b, np, sq, sk = input.size()
         scale = self.scale if self.scale is not None else 1.0
 
-        if self.attn_mask_type == AttnMaskType.causal:
-            assert sq == sk, "causal mask is only for self attention"
-
-            # input is 3D tensor (attn_batches, sq, sk)
-            input = input.view(-1, sq, sk)
-            probs = ScaledUpperTriangMaskedSoftmax.apply(input, scale)
-            return probs.view(b, np, sq, sk)
-        else:
+        if self.attn_mask_type != AttnMaskType.causal:
             # input is 4D tensor (b, np, sq, sk)
-            if mask is not None:
-                return ScaledMaskedSoftmax.apply(input, mask, scale)
-            else:
-                return ScaledSoftmax.apply(input, scale)
+            return (
+                ScaledMaskedSoftmax.apply(input, mask, scale)
+                if mask is not None
+                else ScaledSoftmax.apply(input, scale)
+            )
+        assert sq == sk, "causal mask is only for self attention"
+
+        # input is 3D tensor (attn_batches, sq, sk)
+        input = input.view(-1, sq, sk)
+        probs = ScaledUpperTriangMaskedSoftmax.apply(input, scale)
+        return probs.view(b, np, sq, sk)
 
     def forward_torch_softmax(self, input, mask):
         if self.input_in_float16 and self.softmax_in_fp32:
@@ -211,11 +211,7 @@ class FusedScaleMaskSoftmax(nn.Module):
         probs = torch.nn.Softmax(dim=-1)(mask_output)
 
         if self.input_in_float16 and self.softmax_in_fp32:
-            if self.input_in_fp16:
-                probs = probs.half()
-            else:
-                probs = probs.bfloat16()
-
+            probs = probs.half() if self.input_in_fp16 else probs.bfloat16()
         return probs
 
     @staticmethod

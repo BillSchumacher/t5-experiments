@@ -73,9 +73,9 @@ class T5Dataset(torch.utils.data.Dataset):
     def __getitem__(self, idx):
 
         start_index, end_index, seq_length = self.samples_mapping[idx]
-        sample = []
-        for index in range(start_index, end_index):
-            sample.append(self.indexed_dataset[index])
+        sample = [
+            self.indexed_dataset[index] for index in range(start_index, end_index)
+        ]
         # Note that this rng state should be numpy and not python since
         # python randint is inclusive whereas the numpy one is exclusive.
         np_rng = np.random.RandomState(seed=(self.seed + idx))
@@ -144,7 +144,7 @@ def build_training_sample(sample, target_seq_length,
                                    max_seq_length_dec, masked_spans,
                                    bos_id, eos_id, sentinel_tokens)
 
-    train_sample = {
+    return {
         'text_enc': tokens_enc,
         'text_dec': tokens_dec_in,
         'labels': labels,
@@ -154,7 +154,6 @@ def build_training_sample(sample, target_seq_length,
         'dec_mask': dec_mask,
         'enc_dec_mask': enc_dec_mask,
     }
-    return train_sample
 
 
 def pad_and_convert_to_numpy(tokens, masked_positions,
@@ -237,9 +236,7 @@ def make_attention_mask(source_block, target_block):
     :param target_block: 1-D array
     """
     mask = (target_block[None, :] >= 1) * (source_block[:, None] >= 1)
-    mask = mask.astype(np.int64)
-    # (source_length, target_length)
-    return mask
+    return mask.astype(np.int64)
 
 
 def make_attention_mask_3d(source_block, target_block):
@@ -248,23 +245,18 @@ def make_attention_mask_3d(source_block, target_block):
     :param source_block: 1-D array
     :param target_block: 1-D array
     """
-    mask = (target_block[:, None, :] >= 1) * (source_block[:, :, None] >= 1)
-    # (batch, source_length, target_length)
-    # mask = mask.astype(np.int64)
-    return mask
+    return (target_block[:, None, :] >= 1) * (source_block[:, :, None] >= 1)
 
 
 def make_history_mask(block):
     length = block.shape[0]
     arange = np.arange(length)
     history_mask = (arange[None, ] <= arange[:, None])
-    history_mask = history_mask.astype(np.int64)
-    return history_mask
+    return history_mask.astype(np.int64)
 
 
 def make_history_mask_3d(block):
     batch, length = block.shape
     arange = torch.arange(length, device=block.device)
     history_mask = (arange[None, ] <= arange[:, None])[None, ]
-    history_mask = history_mask.expand(batch, length, length)
-    return history_mask
+    return history_mask.expand(batch, length, length)

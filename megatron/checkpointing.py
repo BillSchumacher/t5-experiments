@@ -84,10 +84,7 @@ def ensure_directory_exists(filename):
 def get_checkpoint_name(checkpoints_path, iteration,
                         release=False):
     """A unified checkpoint name."""
-    if release:
-        directory = 'release'
-    else:
-        directory = 'iter_{:07d}'.format(iteration)
+    directory = 'release' if release else 'iter_{:07d}'.format(iteration)
     # Use both the tensor and pipeline MP rank.
     if mpu.get_pipeline_model_parallel_world_size() == 1:
         return os.path.join(checkpoints_path, directory,
@@ -119,11 +116,11 @@ def read_metadata(tracker_filename):
         except ValueError:
             release = metastring == 'release'
             if not release:
-                print_rank_0('ERROR: Invalid metadata file {}. Exiting'.format(
-                    tracker_filename))
+                print_rank_0(f'ERROR: Invalid metadata file {tracker_filename}. Exiting')
                 sys.exit()
-    assert iteration > 0 or release, 'error parsing metadata file {}'.format(
-        tracker_filename)
+    assert (
+        iteration > 0 or release
+    ), f'error parsing metadata file {tracker_filename}'
 
     # Get the max iteration retrieved across the ranks.
     iters_cuda = torch.cuda.LongTensor([iteration])
@@ -134,10 +131,10 @@ def read_metadata(tracker_filename):
     # If not, print a warning and chose the maximum
     # iteration across all ranks.
     if iteration != max_iter:
-        print('WARNING: on rank {} found iteration {} in the '
-              'metadata while max iteration across the ranks '
-              'is {}, replacing it with max iteration.'.format(
-                  rank, iteration, max_iter), flush=True)
+        print(
+            f'WARNING: on rank {rank} found iteration {iteration} in the metadata while max iteration across the ranks is {max_iter}, replacing it with max iteration.',
+            flush=True,
+        )
     return max_iter, release
 
 
@@ -155,8 +152,7 @@ def get_rng_state():
     if torch.distributed.is_initialized() and \
             mpu.get_data_parallel_world_size() > 1 and \
             args.data_parallel_random_init:
-        rng_state_list = \
-            [None for i in range(mpu.get_data_parallel_world_size())]
+        rng_state_list = [None for _ in range(mpu.get_data_parallel_world_size())]
         torch.distributed.all_gather_object(
             rng_state_list,
             rng_state,
@@ -183,10 +179,7 @@ def save_checkpoint(iteration, model, optimizer, lr_scheduler):
     if not torch.distributed.is_initialized() or mpu.get_data_parallel_rank() == 0:
 
         # Arguments, iteration, and model.
-        state_dict = {}
-        state_dict['args'] = args
-        state_dict['checkpoint_version'] = 3.0
-        state_dict['iteration'] = iteration
+        state_dict = {'args': args, 'checkpoint_version': 3.0, 'iteration': iteration}
         if len(model) == 1:
             state_dict['model'] = model[0].state_dict_for_save_checkpoint()
         else:
@@ -269,31 +262,33 @@ def fix_query_key_value_ordering(model, checkpoint_version):
     """Fix up query/key/value matrix ordering if checkpoint
     version is smaller than 2.0
     """
-    if checkpoint_version < 2.0:
-        if isinstance(model, list):
-            assert len(model)==1
-            model = model[0]
-        for name, param in model.named_parameters():
-            if name.endswith(('.query_key_value.weight', '.query_key_value.bias')):
-                if checkpoint_version == 0:
-                    fixed_param = _transpose_first_dim(param.data, 3, True, model)
-                elif checkpoint_version == 1.0:
-                    fixed_param = _transpose_first_dim(param.data, 3, False, model)
-                else:
-                    print_rank_0(f"Invalid checkpoint version {checkpoint_version}.")
-                    sys.exit()
-                param.data.copy_(fixed_param)
-            if name.endswith(('.key_value.weight', '.key_value.bias')):
-                if checkpoint_version == 0:
-                    fixed_param = _transpose_first_dim(param.data, 2, True, model)
-                elif checkpoint_version == 1.0:
-                    fixed_param = _transpose_first_dim(param.data, 2, False, model)
-                else:
-                    print_rank_0(f"Invalid checkpoint version {checkpoint_version}.")
-                    sys.exit()
-                param.data.copy_(fixed_param)
-        print_rank_0(" succesfully fixed query-key-values ordering for"
-                    " checkpoint version {}".format(checkpoint_version))
+    if checkpoint_version >= 2.0:
+        return
+    if isinstance(model, list):
+        assert len(model)==1
+        model = model[0]
+    for name, param in model.named_parameters():
+        if name.endswith(('.query_key_value.weight', '.query_key_value.bias')):
+            if checkpoint_version == 0:
+                fixed_param = _transpose_first_dim(param.data, 3, True, model)
+            elif checkpoint_version == 1.0:
+                fixed_param = _transpose_first_dim(param.data, 3, False, model)
+            else:
+                print_rank_0(f"Invalid checkpoint version {checkpoint_version}.")
+                sys.exit()
+            param.data.copy_(fixed_param)
+        if name.endswith(('.key_value.weight', '.key_value.bias')):
+            if checkpoint_version == 0:
+                fixed_param = _transpose_first_dim(param.data, 2, True, model)
+            elif checkpoint_version == 1.0:
+                fixed_param = _transpose_first_dim(param.data, 2, False, model)
+            else:
+                print_rank_0(f"Invalid checkpoint version {checkpoint_version}.")
+                sys.exit()
+            param.data.copy_(fixed_param)
+    print_rank_0(
+        f" succesfully fixed query-key-values ordering for checkpoint version {checkpoint_version}"
+    )
 
 def load_checkpoint(model, optimizer, lr_scheduler, load_arg='load', strict=True):
     """Load a model checkpoint and return the iteration.
@@ -311,8 +306,7 @@ def load_checkpoint(model, optimizer, lr_scheduler, load_arg='load', strict=True
 
     # If no tracker file, return iretation zero.
     if not os.path.isfile(tracker_filename):
-        print_rank_0('WARNING: could not find the metadata file {} '.format(
-            tracker_filename))
+        print_rank_0(f'WARNING: could not find the metadata file {tracker_filename} ')
         print_rank_0('    will not load any checkpoints and will start from '
                      'random')
         return 0
@@ -357,9 +351,9 @@ def load_checkpoint(model, optimizer, lr_scheduler, load_arg='load', strict=True
             try:  # Backward compatible with older checkpoints
                 iteration = state_dict['total_iters']
             except KeyError:
-                print_rank_0('A metadata file exists but unable to load '
-                             'iteration from checkpoint {}, exiting'.format(
-                                 checkpoint_name))
+                print_rank_0(
+                    f'A metadata file exists but unable to load iteration from checkpoint {checkpoint_name}, exiting'
+                )
                 sys.exit()
 
     # Check arguments.
@@ -397,10 +391,9 @@ def load_checkpoint(model, optimizer, lr_scheduler, load_arg='load', strict=True
             if lr_scheduler is not None:
                 lr_scheduler.load_state_dict(state_dict['lr_scheduler'])
         except KeyError:
-            print_rank_0('Unable to load optimizer from checkpoint {}. '
-                         'Specify --no-load-optim or --finetune to prevent '
-                         'attempting to load the optimizer state, '
-                         'exiting ...'.format(checkpoint_name))
+            print_rank_0(
+                f'Unable to load optimizer from checkpoint {checkpoint_name}. Specify --no-load-optim or --finetune to prevent attempting to load the optimizer state, exiting ...'
+            )
             sys.exit()
 
     # rng states.
@@ -433,10 +426,9 @@ def load_checkpoint(model, optimizer, lr_scheduler, load_arg='load', strict=True
                 mpu.get_cuda_rng_tracker().set_states(
                     state_dict['rng_tracker_states'])
         except KeyError:
-            print_rank_0('Unable to load rng state from checkpoint {}. '
-                         'Specify --no-load-rng or --finetune to prevent '
-                         'attempting to load the rng state, '
-                         'exiting ...'.format(checkpoint_name))
+            print_rank_0(
+                f'Unable to load rng state from checkpoint {checkpoint_name}. Specify --no-load-rng or --finetune to prevent attempting to load the rng state, exiting ...'
+            )
             sys.exit()
 
     # Some utilities want to load a checkpoint without distributed being initialized
@@ -468,8 +460,9 @@ def load_biencoder_checkpoint(model, only_query_model=False,
 
     checkpoint_name = get_checkpoint_name(load_path, iteration, False)
     if mpu.get_data_parallel_rank() == 0:
-        print('global rank {} is loading checkpoint {}'.format(
-            torch.distributed.get_rank(), checkpoint_name))
+        print(
+            f'global rank {torch.distributed.get_rank()} is loading checkpoint {checkpoint_name}'
+        )
 
     state_dict = torch.load(checkpoint_name, map_location='cpu')
     ret_state_dict = state_dict['model']
@@ -484,7 +477,7 @@ def load_biencoder_checkpoint(model, only_query_model=False,
     torch.distributed.barrier()
 
     if mpu.get_data_parallel_rank() == 0:
-        print(' successfully loaded {}'.format(checkpoint_name))
+        print(f' successfully loaded {checkpoint_name}')
 
     return model
 

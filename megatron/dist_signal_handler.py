@@ -4,11 +4,12 @@ import torch
 
 
 def get_world_size():
-    if torch.distributed.is_available() and torch.distributed.is_initialized():
-        world_size = torch.distributed.get_world_size()
-    else:
-        world_size = 1
-    return world_size
+    return (
+        torch.distributed.get_world_size()
+        if torch.distributed.is_available()
+        and torch.distributed.is_initialized()
+        else 1
+    )
 
 
 def get_device(local_rank=None):
@@ -32,19 +33,14 @@ def all_gather_item(item, dtype, group=None, async_op=False, local_rank=None):
 
     device = get_device(local_rank)
 
-    if group is not None:
-        group_size = group.size()
-    else:
-        group_size = get_world_size()
-
+    group_size = group.size() if group is not None else get_world_size()
     tensor = torch.tensor([item], device=device, dtype=dtype)
     output_tensors = [
         torch.zeros(1, dtype=tensor.dtype, device=tensor.device)
         for _ in range(group_size)
     ]
     torch.distributed.all_gather(output_tensors, tensor, group, async_op)
-    output = [elem.item() for elem in output_tensors]
-    return output
+    return [elem.item() for elem in output_tensors]
 
 
 class DistributedSignalHandler:
@@ -52,10 +48,7 @@ class DistributedSignalHandler:
         self.sig = sig
 
     def signals_received(self):
-        all_received = all_gather_item(
-            self._signal_received, dtype=torch.int32
-        )
-        return all_received
+        return all_gather_item(self._signal_received, dtype=torch.int32)
 
     def __enter__(self):
         self._signal_received = False

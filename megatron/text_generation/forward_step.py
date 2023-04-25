@@ -94,9 +94,7 @@ class ForwardStep:
 
 def _get_recv_buffer_dtype(args):
     """Receive happens between the layers."""
-    if args.fp32_residual_connection:
-        return torch.float
-    return args.params_dtype
+    return torch.float if args.fp32_residual_connection else args.params_dtype
 
 
 
@@ -146,11 +144,7 @@ def _no_pipelining_forward_step(model, tokens, position_ids, attention_mask,
     # Update the sequence length offset.
     inference_params.sequence_len_offset += tokens.size(1)
 
-    logits = None
-    if mpu.is_pipeline_last_stage():
-        logits = output_tensor
-
-    return logits
+    return output_tensor if mpu.is_pipeline_last_stage() else None
 
 
 

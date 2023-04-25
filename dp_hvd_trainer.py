@@ -88,12 +88,11 @@ class HvdTorchNNTrainer(TorchTrainer):
         report['train_examples_seen'] = report.get('train_examples_seen', 0) * hvd.size()
 
         # writing to tensorboard should be done by one worker
-        if hvd.rank() == 0:
-            if metrics and self.tensorboard_log_dir is not None:
-                with self.tb_train_writer.as_default() as writer:
-                    for name, score in metrics:
-                        self._tf.summary.scalar(name=f'{tensorboard_tag}/{name}', data=score, step=tensorboard_index)
-                    writer.flush()
+        if hvd.rank() == 0 and metrics and self.tensorboard_log_dir is not None:
+            with self.tb_train_writer.as_default() as writer:
+                for name, score in metrics:
+                    self._tf.summary.scalar(name=f'{tensorboard_tag}/{name}', data=score, step=tensorboard_index)
+                writer.flush()
 
         self._send_event(event_name='after_train_log', data=report)
 
@@ -116,40 +115,42 @@ class HvdTorchNNTrainer(TorchTrainer):
         metrics = list(report['metrics'].items())
 
         # write to tensorboard only from one worker
-        if hvd.rank() == 0:
-            if tensorboard_tag is not None and self.tensorboard_log_dir is not None:
-                with self.tb_valid_writer.as_default() as writer:
-                    for name, score in metrics:
-                        self._tf.summary.scalar(name=f'{tensorboard_tag}/{name}', data=score, step=tensorboard_index)
-                    writer.flush()
+        if (
+            hvd.rank() == 0
+            and tensorboard_tag is not None
+            and self.tensorboard_log_dir is not None
+        ):
+            with self.tb_valid_writer.as_default() as writer:
+                for name, score in metrics:
+                    self._tf.summary.scalar(name=f'{tensorboard_tag}/{name}', data=score, step=tensorboard_index)
+                writer.flush()
 
         m_name, score = metrics[0]
 
         # Update the patience
         if self.score_best is None:
             self.patience = 0
+        elif self.improved(score, self.score_best):
+            self.patience = 0
         else:
-            if self.improved(score, self.score_best):
-                self.patience = 0
-            else:
-                self.patience += 1
+            self.patience += 1
 
         # Run the validation model-saving logic
         if self._is_initial_validation():
-            loggger_info('Initial best {} of {}'.format(m_name, score))
+            loggger_info(f'Initial best {m_name} of {score}')
             self.score_best = score
         elif self._is_first_validation() and self.score_best is None:
-            loggger_info('First best {} of {}'.format(m_name, score))
+            loggger_info(f'First best {m_name} of {score}')
             self.score_best = score
             loggger_info('Saving model')
             self.save()
         elif self.improved(score, self.score_best):
-            loggger_info('Improved best {} of {}'.format(m_name, score))
+            loggger_info(f'Improved best {m_name} of {score}')
             self.score_best = score
             loggger_info('Saving model')
             self.save()
         else:
-            loggger_info('Did not improve on the {} of {}'.format(m_name, self.score_best))
+            loggger_info(f'Did not improve on the {m_name} of {self.score_best}')
 
         report['impatience'] = self.patience
         if self.validation_patience > 0:

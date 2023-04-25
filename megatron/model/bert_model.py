@@ -89,11 +89,12 @@ class BertLMHead(MegatronModule):
         hidden_states = self.dense(hidden_states)
         hidden_states = self.gelu(hidden_states)
         hidden_states = self.layernorm(hidden_states)
-        output = parallel_lm_logits(hidden_states,
-                                    word_embeddings_weight,
-                                    self.parallel_output,
-                                    bias=self.bias)
-        return output
+        return parallel_lm_logits(
+            hidden_states,
+            word_embeddings_weight,
+            self.parallel_output,
+            bias=self.bias,
+        )
 
 
 def post_language_model_processing(lm_output, pooled_output,
@@ -105,20 +106,16 @@ def post_language_model_processing(lm_output, pooled_output,
     lm_logits = lm_head(
         lm_output, logit_weights)
 
-    binary_logits = None
-    if binary_head is not None:
-        binary_logits = binary_head(pooled_output)
-
+    binary_logits = binary_head(pooled_output) if binary_head is not None else None
     if lm_labels is None:
         return lm_logits, binary_logits
+    if fp16_lm_cross_entropy:
+        assert lm_logits.dtype == torch.half
+        lm_loss = mpu.vocab_parallel_cross_entropy(lm_logits, lm_labels)
     else:
-        if fp16_lm_cross_entropy:
-            assert lm_logits.dtype == torch.half
-            lm_loss = mpu.vocab_parallel_cross_entropy(lm_logits, lm_labels)
-        else:
-            lm_loss = mpu.vocab_parallel_cross_entropy(lm_logits.float(),
-                                                       lm_labels)
-        return lm_loss, binary_logits
+        lm_loss = mpu.vocab_parallel_cross_entropy(lm_logits.float(),
+                                                   lm_labels)
+    return lm_loss, binary_logits
 
 
 class BertModel(MegatronModule):
@@ -202,21 +199,22 @@ class BertModel(MegatronModule):
         """For easy load when model is combined with other heads,
         add an extra key."""
 
-        state_dict_ = {}
-        state_dict_[self._language_model_key] \
-            = self.language_model.state_dict_for_save_checkpoint(
-            destination, prefix, keep_vars)
+        state_dict_ = {
+            self._language_model_key: self.language_model.state_dict_for_save_checkpoint(
+                destination, prefix, keep_vars
+            )
+        }
         if self.post_process:
             state_dict_[self._lm_head_key] \
-                = self.lm_head.state_dict_for_save_checkpoint(
+                    = self.lm_head.state_dict_for_save_checkpoint(
                 destination, prefix, keep_vars)
         if self.post_process and self.add_binary_head:
             state_dict_[self._binary_head_key] \
-                = self.binary_head.state_dict(destination, prefix, keep_vars)
+                    = self.binary_head.state_dict(destination, prefix, keep_vars)
         # Save word_embeddings.
         if self.post_process and not self.pre_process:
             state_dict_[self._word_embeddings_for_head_key] \
-                = self.word_embeddings.state_dict(destination, prefix, keep_vars)
+                    = self.word_embeddings.state_dict(destination, prefix, keep_vars)
         return state_dict_
 
     def load_state_dict(self, state_dict, strict=True):

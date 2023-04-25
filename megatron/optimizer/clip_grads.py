@@ -64,8 +64,8 @@ def clip_grad_norm_fp32(parameters, max_norm, norm_type=2):
             # Make sure the grads are in fp32
             assert param.grad.type() == 'torch.cuda.FloatTensor'
             grads.append(grad)
-        if grad_not_none and is_not_shared and is_not_tp_duplicate:
-            grads_for_norm.append(grad)
+            if is_not_shared and is_not_tp_duplicate:
+                grads_for_norm.append(grad)
 
     # Norm parameters.
     max_norm = float(max_norm)

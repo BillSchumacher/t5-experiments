@@ -46,10 +46,9 @@ class MemoryBuffer:
         1-D data starting at `start_index`."""
         end_index = start_index + shape.numel()
         assert end_index <= self.numel, \
-            'requested tensor is out of the buffer range.'
+                'requested tensor is out of the buffer range.'
         buffer_tensor = self.data[start_index:end_index]
-        buffer_tensor = buffer_tensor.view(shape)
-        return buffer_tensor
+        return buffer_tensor.view(shape)
 
 
 
@@ -213,8 +212,7 @@ class DistributedDataParallel(DistributedDataParallelBase):
                     param.main_grad = param.grad
 
             # For each bucket, all-reduce and copy all-reduced grads.
-            for tp in buckets:
-                bucket = buckets[tp]
+            for bucket in buckets.values():
                 grads = [param.grad.data for param in bucket]
                 coalesced = _flatten_dense_tensors(grads)
                 coalesced /= mpu.get_data_parallel_world_size()

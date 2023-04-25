@@ -48,8 +48,7 @@ class ClassificationTransform():
             ])
 
     def __call__(self, input):
-        output = self.transform(input)
-        return output
+        return self.transform(input)
 
 
 
